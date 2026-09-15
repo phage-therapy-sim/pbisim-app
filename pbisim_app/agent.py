@@ -220,6 +220,30 @@ _CONFIGURE_TOOL = {
                     "from": {"type": "string"}, "to": {"type": "string"}, "rate": {"type": "number"},
                 }, "required": ["from", "to", "rate"]},
             },
+            "transition_graph": {
+                "type": "array",
+                "description": ("Bacterial PHENOTYPIC transitions (growth-independent switching, "
+                                "h^-1, e.g. persister / phase variation) as from→to→rate edges. "
+                                "Node names = strain names (direct / strainset) or BRG genotype "
+                                "labels ('00','01',... / 'phi01_abx0')."),
+                "items": {"type": "object", "properties": {
+                    "from": {"type": "string"}, "to": {"type": "string"}, "rate": {"type": "number"},
+                }, "required": ["from", "to", "rate"]},
+            },
+            "phage_mutation_graph": {
+                "type": "array",
+                "description": "Phage→phage mutation at lysis (fraction of each burst), edges between phage names",
+                "items": {"type": "object", "properties": {
+                    "from": {"type": "string"}, "to": {"type": "string"}, "rate": {"type": "number"},
+                }, "required": ["from", "to", "rate"]},
+            },
+            "phage_transition_graph": {
+                "type": "array",
+                "description": "Phage→phage phenotypic transitions of free phage (h^-1), edges between phage names",
+                "items": {"type": "object", "properties": {
+                    "from": {"type": "string"}, "to": {"type": "string"}, "rate": {"type": "number"},
+                }, "required": ["from", "to", "rate"]},
+            },
             "equilibrium_ic": {"type": "boolean", "description": "BRG: seed genotype densities from the replicator equilibrium"},
             "total_bacteria": {"type": "number", "description": "BRG: total CFU/mL for the equilibrium IC"},
             "doses": {

@@ -593,9 +593,11 @@ def render_model_builder(inoculum_mode="magnitude"):
                 with st.expander("Custom mutation network (any number of strains)",
                                  expanded=(n_strains != 2**n_phages)):
                     st.caption(
-                        "Define arbitrary strain→strain mutation transitions. Works for any "
-                        "strain count (lifts the 2^n_phages requirement). **If any transition "
-                        "is added here it overrides the per-locus shortcut above.**"
+                        "Define arbitrary strain→strain mutation edges (per replication). Works "
+                        "for any strain count (lifts the 2^n_phages requirement). **If any edge "
+                        "is added here it overrides the per-locus shortcut above.** For "
+                        "growth-independent phenotypic switching use the transitions section "
+                        "below the builder columns."
                     )
                     render_mutation_graph_editor(strains, key_prefix="dir_trans")
 
@@ -759,10 +761,9 @@ def render_model_builder(inoculum_mode="magnitude"):
         with col2:
             st.markdown("### Auto-generated Genotypes")
             # Show list of 2^(m+a) genotypes and initial conditions inputs
-            import itertools
             n_abx = len(antibiotics)
-            combs = list(itertools.product([0, 1], repeat=n_phg_loci + n_abx))
-            st.caption(f"Based on {n_phg_loci} phages and {n_abx} antibiotics, there are {len(combs)} genotypes:")
+            st.caption(f"Based on {n_phg_loci} phages and {n_abx} antibiotics, there are "
+                       f"{2 ** (n_phg_loci + n_abx)} genotypes:")
 
             st.session_state["int_brg_use_eq_ic"] = st.checkbox(
                 "Use equilibrium initial condition",
@@ -784,16 +785,7 @@ def render_model_builder(inoculum_mode="magnitude"):
                     st.caption("Per-genotype B0 computed from `brg.equilibrium_initial_condition()` at run time.")
             else:
                 brg_initial_B = st.session_state.get("int_brg_initial_B", {})
-                for idx, comb in enumerate(combs):
-                    if n_abx == 0:
-                        lbl = "".join(map(str, comb))
-                    else:
-                        p_lbl = "".join(map(str, comb[:n_phg_loci])) if n_phg_loci > 0 else ""
-                        a_lbl = "".join(map(str, comb[n_phg_loci:]))
-                        if n_phg_loci > 0:
-                            lbl = f"phi{p_lbl}_abx{a_lbl}"
-                        else:
-                            lbl = f"abx{a_lbl}"
+                for idx, lbl in enumerate(brg_genotype_labels(n_phg_loci, n_abx)):
                     brg_initial_B[lbl] = st.number_input(
                         (f"Initial ratio for genotype {lbl}" if _ratio_inoc
                          else f"Initial count for genotype {lbl}"),
@@ -870,31 +862,12 @@ def render_model_builder(inoculum_mode="magnitude"):
                                     key=f"ss_ads_dorm_input_{i}_{p_idx}"
                                 )
 
-            # Transitions graph editor
-            st.markdown("#### Mutation Graph (Transitions)")
-            transitions = st.session_state.get("int_transitions", [])
-
-            for idx, trans in enumerate(transitions):
-                c_src, c_dest, c_rate, c_del = st.columns([3, 3, 3, 1])
-                with c_src:
-                    src_ops = [s["name"] for s in strains]
-                    trans["from"] = st.selectbox(f"From", src_ops, index=src_ops.index(trans["from"]) if trans["from"] in src_ops else 0, key=f"trans_src_{idx}")
-                with c_dest:
-                    dest_ops = [s["name"] for s in strains]
-                    trans["to"] = st.selectbox(f"To", dest_ops, index=dest_ops.index(trans["to"]) if trans["to"] in dest_ops else 0, key=f"trans_dest_{idx}")
-                with c_rate:
-                    trans["rate"] = st.number_input(f"Rate", value=float(trans["rate"]), format="%.2e", key=f"trans_rate_{idx}")
-                with c_del:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button(":material/delete:", key=f"trans_del_{idx}"):
-                        transitions.pop(idx)
-                        st.session_state.int_transitions = transitions
-                        st.rerun()
-
-            if st.button("+ Add Mutation Transition"):
-                transitions.append({"from": strains[0]["name"] if strains else "", "to": strains[0]["name"] if strains else "", "rate": 1e-7})
-                st.session_state.int_transitions = transitions
-                st.rerun()
+            # Mutation graph editor (division-coupled). Phenotypic transitions and the
+            # phage generators live in the shared section below the builder columns.
+            st.markdown("#### Mutation Graph")
+            st.caption("Strain→strain mutation at division (rate per replication). Mass-conserving: "
+                       "each origin's diagonal is rebalanced automatically.")
+            render_mutation_graph_editor(strains, key_prefix="trans")
 
         with col2:
             st.markdown("### Phage Strains")
@@ -988,7 +961,62 @@ def render_model_builder(inoculum_mode="magnitude"):
                                 help="Return transfer from the peripheral compartment. Used only when k12 > 0.")
                         if phages[idx]["pk_mode"] == "Mass-Conserving":
                             phages[idx]["Vi"] = st.number_input("Infection Site Volume (Vi mL)", value=float(phages[idx].get("Vi", 10.0)), key=f"ss_phg_vi_{idx}")
+
+    render_generator_matrix_editors(builder_mode)
     return builder_mode
+
+
+def render_generator_matrix_editors(builder_mode):
+    """Phenotypic transitions (bacteria) + phage mutation / transition generators —
+    the three engine generator matrices no builder column exposes (the bacterial
+    MUTATION matrix is configured per mode above: per-locus μ / mutation graph).
+
+    Mode-aware node labels: Direct & StrainSet use the strain names, BRG the
+    auto-generated genotype labels; phages use their names in every mode. Wired into
+    the build via ``generator_matrices_from_state`` (Direct → ``with_mutations``,
+    StrainSet → ``set_transition_graph`` / ``set_phage_*_rates``, BRG → post-build
+    ``cfg.<field>``)."""
+    strains = st.session_state.get("int_strains", [])
+    phages = st.session_state.get("int_phages", [])
+    antibiotics = st.session_state.get("int_antibiotics", [])
+    if builder_mode == "Binary Genotypes (BRG)":
+        bact_names = brg_genotype_labels(len(phages), len(antibiotics))
+    else:
+        bact_names = [s["name"] for s in strains]
+    phage_names = [p["name"] for p in phages]
+    n_edges = sum(len(st.session_state.get(k, []) or [])
+                  for k in ("int_bact_transitions", "int_phage_mutations", "int_phage_transitions"))
+    if len(bact_names) < 2 and len(phage_names) < 2:
+        return   # nothing to switch between
+
+    st.markdown("---")
+    with st.expander("Phenotypic transitions & phage evolution (generator matrices)",
+                     expanded=n_edges > 0):
+        st.caption(
+            "Optional rate graphs the engine applies as mass-conserving generator matrices "
+            "(`M[dest, origin]`, diagonal = −outflow). **Mutation** is coupled to replication "
+            "(bacteria: per division; phage: per burst), so it vanishes when growth / lysis "
+            "stops. **Phenotypic transitions** are first-order switches in h⁻¹ applied to the "
+            "population directly (persister-like / phase-variation switching, phage "
+            "state changes) — they act even in stationary phase."
+        )
+        if len(bact_names) >= 2:
+            st.markdown("**Bacterial phenotypic transitions** (h⁻¹, growth-independent)")
+            if builder_mode == "Binary Genotypes (BRG)":
+                st.caption("Nodes are the BRG genotype labels (bacterial mutation itself is the "
+                           "per-locus μ in the phage-locus cards).")
+            render_rate_graph_editor(bact_names, "int_bact_transitions", "gen_btrans",
+                                     rate_label="Rate (h⁻¹)", default_rate=0.01,
+                                     add_label="+ Add bacterial transition")
+        if len(phage_names) >= 2:
+            st.markdown("**Phage mutation** (fraction of each burst switching phage type)")
+            render_rate_graph_editor(phage_names, "int_phage_mutations", "gen_pmut",
+                                     rate_label="Rate (per burst)", default_rate=1e-6,
+                                     add_label="+ Add phage mutation")
+            st.markdown("**Phage phenotypic transitions** (h⁻¹, applied to free phage)")
+            render_rate_graph_editor(phage_names, "int_phage_transitions", "gen_ptrans",
+                                     rate_label="Rate (h⁻¹)", default_rate=0.01,
+                                     add_label="+ Add phage transition")
 
 
 def render():

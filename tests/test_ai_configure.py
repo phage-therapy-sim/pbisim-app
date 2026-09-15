@@ -110,6 +110,32 @@ def test_configure_strainset_mode_builds():
     assert at.session_state["simulation_config"] is not None
 
 
+def test_configure_generator_graphs_any_mode():
+    """The configure tool accepts transition_graph / phage_mutation_graph /
+    phage_transition_graph (any mode) and they reach the built config as mass-conserving
+    generator matrices."""
+    at = _configure({
+        "builder_mode": "direct",
+        "strains": [{"name": "WT", "growth_rate": 1.2, "initial_B": 1e7},
+                    {"name": "persister", "growth_rate": 0.2, "initial_B": 10}],
+        "phages": [{"name": "P0", "burst_sizes": 50, "adsorption_rates": [1e-8, 0.0]},
+                   {"name": "P1", "burst_sizes": 50, "adsorption_rates": [1e-8, 0.0]}],
+        "transition_graph": [{"from": "WT", "to": "persister", "rate": 0.01},
+                             {"from": "persister", "to": "WT", "rate": 0.1}],
+        "phage_mutation_graph": [{"from": "P0", "to": "P1", "rate": 1e-5}],
+        "phage_transition_graph": [{"from": "P1", "to": "P0", "rate": 0.02}],
+        "t_end": 24.0,
+    })
+    ss = at.session_state
+    assert len(ss["int_bact_transitions"]) == 2
+    assert ss["int_phage_mutations"] == [{"from": "P0", "to": "P1", "rate": 1e-5}]
+    _run_simulator(at)
+    cfg = at.session_state["simulation_config"]
+    assert cfg.transition_rates[1, 0] == 0.01 and cfg.transition_rates[0, 1] == 0.1
+    assert cfg.transition_rates[0, 0] == -0.01 and cfg.transition_rates[1, 1] == -0.1
+    assert cfg.mutation_rates_phage[1, 0] == 1e-5 and cfg.transition_rates_phage[0, 1] == 0.02
+
+
 class _SummarizingAgent:
     """Fake agent: generate() calls the real summarize handler and returns its text."""
     def __init__(self):

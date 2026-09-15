@@ -252,6 +252,30 @@ sequential mutational pathways, or strains with heterogeneous fitness landscapes
 
 ---
 
+### 4.4b Phenotypic transitions & phage evolution (all modes)
+
+Below the builder columns, the **Phenotypic transitions & phage evolution** expander
+exposes the engine's three remaining *generator matrices* — the mutation matrix above is
+the fourth. Each is a mass-conserving rate graph (`M[dest, origin]`, diagonal = −outflow)
+edited as directed edges (from → to, rate):
+
+| Graph | Engine field | Units | Coupled to |
+|---|---|---|---|
+| Bacterial mutation (per mode, above) | `mutation_rates` | per division | replication — vanishes when growth stops |
+| **Bacterial phenotypic transitions** | `transition_rates` | h⁻¹ | nothing — a first-order switch on the population itself (persister / phase-variation switching; acts in stationary phase) |
+| **Phage mutation** | `mutation_rates_phage` | fraction of each burst | lysis |
+| **Phage phenotypic transitions** | `transition_rates_phage` | h⁻¹ | nothing — applied to free phage |
+
+Nodes are the strain names (Direct / StrainSet), the auto-generated genotype labels
+(BRG: `00`, `01`, … or `phi01_abx0`) and the phage names. The section appears once the
+model has ≥ 2 strains or ≥ 2 phages. Configured edges are sweepable (Parameter Sweeps,
+grouped under Bacterial / Phage), estimable on the Calibration page (only the edges you
+configured are offered; the diagonal is always derived so the fit can't create or destroy
+cells), captured by Scenarios, and mirrored in the reproduction script. The
+state-dependent `with_transition_function` (a callable) is scripting-only.
+
+---
+
 ### 4.5 Antibiotics & Immunity Tab
 
 **Antibiotics**
@@ -658,6 +682,7 @@ part" pipeline.
 | Q | `n_depth` | integer | Number of dormancy layers |
 | γ | `resus_rates` | h⁻¹ | Dormant-to-active resuscitation rate (per layer) |
 | μ_mut | `mutation_rate` | — | Per-division probability of resistance mutation |
+| — | `transition_rates` | h⁻¹ | Growth-independent phenotypic switching between strains (§4.4b) |
 | fc | `fitness_cost` | — | Fractional reduction in μ for each resistance allele |
 
 ### Phage strain

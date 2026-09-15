@@ -58,6 +58,7 @@ def test_modelbuilder_constructor_signature():
         "with_growth_function",
         "with_sequential_growth",
         "with_smooth_efficiency_growth",
+        "with_transition_function",
         "build",
     ],
 )
@@ -66,6 +67,22 @@ def test_modelbuilder_methods_exist(method):
     assert callable(getattr(ModelBuilder, method, None)), (
         f"system_prompt.md uses ModelBuilder.{method}() but it no longer exists"
     )
+
+
+def test_with_mutations_signature():
+    """The prompt documents all four generator matrices + the per-locus shortcut."""
+    from pbisim.builder import ModelBuilder
+    params = _params(ModelBuilder.with_mutations)
+    for name in ("mutation_rates", "transition_rates", "mutation_rates_phage",
+                 "transition_rates_phage", "phage_resistance_rates"):
+        assert name in params, f"with_mutations lost parameter '{name}'"
+
+
+def test_strainset_generator_setters_exist():
+    from pbisim import StrainSet
+    for m in ("set_mutation_graph", "set_transition_graph",
+              "set_phage_mutation_rates", "set_phage_transition_rates"):
+        assert callable(getattr(StrainSet, m, None)), f"system_prompt.md uses StrainSet.{m}()"
 
 
 def test_with_antibiotic_signature():

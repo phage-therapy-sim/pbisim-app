@@ -708,3 +708,62 @@ def test_amortized_fit_torch_free():
     assert res["initials"]["latent_periods[0,0]"] == 0.5      # frozen context in initials
     assert res["config"] is not None and float(res["config"].latent_periods[0, 0]) == 0.5
     assert "torch" not in sys.modules
+
+
+# ── Generator matrices: fit targets + mass-conserving diagonal ────────────────────────
+
+def _generator_cfg():
+    return (ModelBuilder(n_bacteria=2, n_phages=2)
+            .with_growth_rates([1.0, 0.9])
+            .with_phage_params(adsorption_rates=[[1e-8, 1e-8], [0.0, 0.0]], burst_sizes=50,
+                               latent_periods=0.5, phage_decay_rates=[0.1, 0.1])
+            .with_mutations(mutation_rates=[[-1e-7, 0], [1e-7, 0]],
+                            transition_rates=[[-0.02, 0], [0.02, 0]],
+                            mutation_rates_phage=[[-1e-6, 0], [1e-6, 0]],
+                            transition_rates_phage=[[0, 0.03], [0, -0.03]])
+            .build())
+
+
+def test_available_targets_include_configured_generator_edges():
+    """Phenotypic-transition + phage generator entries are offered ONLY for edges the
+    model configures (nonzero), while mutation_rates keeps offering every off-diagonal."""
+    paths = {p for (_l, p, *_r) in nls.available_targets(_generator_cfg())}
+    assert {"mutation_rates[1,0]", "mutation_rates[0,1]"} <= paths
+    assert "transition_rates[1,0]" in paths and "transition_rates[0,1]" not in paths
+    assert "mutation_rates_phage[1,0]" in paths and "mutation_rates_phage[0,1]" not in paths
+    assert "transition_rates_phage[0,1]" in paths and "transition_rates_phage[1,0]" not in paths
+    assert not any(p.endswith("[0,0]") or p.endswith("[1,1]") for p in paths
+                   if p.split("[")[0] in nls._GENERATOR_FIELDS)     # diagonals never freeable
+
+
+def test_freed_generator_entry_keeps_column_mass_conserving():
+    """Freeing / re-fixing an off-diagonal generator rate must rebalance that column's
+    diagonal at solve time — otherwise the fit would create or destroy cells instead of
+    moving them (this leaked mass for the pre-existing mutation_rates targets too)."""
+    cfg = _generator_cfg()
+    targets = [
+        {"path": "mutation_rates[1,0]", "free": True, "value": 1e-7, "lo": 1e-9, "hi": 1e-4, "log": True},
+        {"path": "transition_rates[1,0]", "free": False, "value": 0.05, "lo": 1e-4, "hi": 10, "log": True},
+        {"path": "transition_rates_phage[0,1]", "free": True, "value": 0.03, "lo": 1e-4, "hi": 10, "log": True},
+        {"path": "mutation_rates[0,1]", "free": False, "value": 0.0, "lo": 1e-9, "hi": 1e-4, "log": True},
+    ]
+    base, spec = nls.build_param_spec_v2(cfg, targets)
+    assert spec.paths == ["free0", "free2"]
+    x = spec.initial_vector()
+    c2 = spec.apply(x, base)
+    vals = spec.as_dict(x)
+    assert np.isclose(c2.mutation_rates[1, 0], vals["free0"])
+    assert np.isclose(c2.mutation_rates[0, 0], -vals["free0"])
+    assert np.isclose(c2.transition_rates_phage[0, 1], vals["free2"])
+    assert np.isclose(c2.transition_rates_phage[1, 1], -vals["free2"])
+    assert c2.transition_rates[1, 0] == 0.05 and c2.transition_rates[0, 0] == -0.05   # re-fixed
+    for fld in nls._GENERATOR_FIELDS:
+        assert np.allclose(getattr(c2, fld).sum(axis=0), 0.0), fld
+    # a mapped (Derived) generator entry is rebalanced too
+    thetas = [{"name": "k", "lo": 1e-4, "hi": 1.0, "log": True, "initial": 0.1}]
+    base, spec = nls.build_param_spec_v2(
+        cfg, [{"path": "transition_rates[1,0]", "free": False, "value": 0.02,
+               "lo": 1e-4, "hi": 10, "log": True}],
+        thetas=thetas, mappings=[{"path": "transition_rates[1,0]", "expr": "2*k"}])
+    c3 = spec.apply(spec.initial_vector(), base)
+    assert np.isclose(c3.transition_rates[1, 0], 0.2) and np.isclose(c3.transition_rates[0, 0], -0.2)

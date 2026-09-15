@@ -620,3 +620,40 @@ def test_infected_nutrient_consumption_is_sweepable_per_phage():
     assert "Infected-cell nutrient consumption (ALL phages)" in p
     c, *_ = apply_sweep_parameter(2.5, p[lbl], cfg, np.array([1e7]), np.array([1e6, 1e6]), 1.0, {})
     assert c.infected_nutrient_consumption[0] == 2.5 and c.infected_nutrient_consumption[1] == 0.0
+
+
+def test_generator_matrix_sweep_entries_all_four_fields():
+    """Sweepable params cover every generator matrix (bacterial mutation + phenotypic
+    transitions, phage mutation + transitions), each applied mass-conservingly (the
+    origin column's diagonal is rebalanced)."""
+    cfg = (ModelBuilder(n_bacteria=2, n_phages=2)
+           .with_growth_rates([1.0, 0.9])
+           .with_phage_params(adsorption_rates=[[1e-8, 1e-8], [0.0, 0.0]], burst_sizes=50,
+                              latent_periods=0.5, phage_decay_rates=[0.1, 0.1])
+           .with_mutations(mutation_rates=[[-1e-7, 0], [1e-7, 0]],
+                           transition_rates=[[-0.02, 0], [0.02, 0]],
+                           mutation_rates_phage=[[-1e-6, 0], [1e-6, 0]],
+                           transition_rates_phage=[[0, 0.03], [0, -0.03]])
+           .build())
+    strains = [{"name": "WT"}, {"name": "R"}]
+    phages = [{"name": "PA"}, {"name": "PB"}]
+    params = get_sweep_parameters(cfg, strains=strains, phages=phages)
+    labels = {
+        "mutation_rates": "Mutation Rate - WT → R",
+        "transition_rates": "Phenotypic Transition Rate - WT → R",
+        "mutation_rates_phage": "Phage Mutation Rate - Phage 0 (PA) → Phage 1 (PB)",
+        "transition_rates_phage": "Phage Transition Rate - Phage 1 (PB) → Phage 0 (PA)",
+    }
+    from pbisim_app.sweep_helper import sweep_category
+    for fld, lab in labels.items():
+        assert lab in params, (lab, [k for k in params if "Rate -" in k])
+        meta = params[lab]
+        assert meta["type"] == "mutation" and meta["field"] == fld
+        assert sweep_category(lab, meta) == ("Phage" if fld.endswith("_phage") else "Bacterial")
+        new_cfg, *_ = apply_sweep_parameter(0.5, meta, cfg, np.array([1e7, 10.0]),
+                                            np.array([1e6, 1e6]), 1.0, {})
+        M = getattr(new_cfg, fld)
+        assert M[meta["dest"], meta["origin"]] == 0.5
+        assert np.allclose(M.sum(axis=0), 0.0), fld            # still a generator
+        assert np.allclose(getattr(cfg, fld).sum(axis=0), 0.0)  # original untouched
+        assert getattr(cfg, fld)[meta["dest"], meta["origin"]] != 0.5

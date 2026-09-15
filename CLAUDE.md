@@ -18,7 +18,7 @@ run parameter sweeps, design clinical trials, and ask an AI assistant to build a
 explain simulations in natural language.
 
 **Status:** active development, **deployed on Render** (Standard instance, auto-deploy
-from `main`). **288 tests passing.** Depends on `pbisim>=1.0` (engine is now **2.0.0**)
+from `main`). **300 tests passing.** Depends on `pbisim>=1.0` (engine is now **2.0.0**)
 **and `pbisim-fit>=0.1`** (now **1.0.0**)
 — the fit integration is **LIVE** (the Calibration page runs pbisim-fit's NLS; lazy
 import keeps the app torch-free). See §5.3 in ECOSYSTEM.md.
@@ -245,6 +245,53 @@ restore, invalid-cookie, sign-out suppression).
   current and re-run `tests/test_system_prompt_sync.py` after any pbisim upgrade.
 - Preset `script_code` strings for type="single" presets (01–10, 13) are reference
   only — they are not executed. Any API mismatch there is cosmetic but should be fixed.
+
+## Done this session (2026-09-15) — generator matrices: phenotypic transitions + phage mutation/transitions
+
+Owner: "the app doesn't incorporate transition matrices applied to bacteria or phages." Confirmed:
+the engine has FOUR mass-conserving generators (`M[dest, origin]`, diagonal = −outflow) —
+`mutation_rates` (bacteria, applied to the DIVISION flux → vanishes when growth stops),
+`transition_rates` (bacteria, first-order switch on `B` itself, h⁻¹, growth-independent),
+`mutation_rates_phage` (applied to the lysis yield) and `transition_rates_phage` (on free `P`) —
+and the app only ever wired the first (per-locus μ / `int_transitions` mutation graph). The other
+three were unreachable from every builder mode. Now:
+- **Shared edge lists** (all `int_*` → captured by Scenarios): `int_bact_transitions`,
+  `int_phage_mutations`, `int_phage_transitions` (`GENERATOR_GRAPH_KEYS` in common.py; the
+  historically-named `int_transitions` stays the bacterial MUTATION graph). Generic
+  `render_rate_graph_editor(names, state_key, prefix)` replaces the two duplicated inline
+  editors (`render_mutation_graph_editor` is a thin wrapper); `rate_matrix_from_graph` /
+  `edges_from_rate_matrix` / `graph_dict_from_edges` / `brg_genotype_labels` (mirrors the
+  engine's `strain_labels`, asserted equal in a test) are the pure helpers.
+- **UI:** one mode-aware expander below the builder columns (`render_generator_matrix_editors`
+  in simulator.py, so Calibration's embedded builder gets it too): bacterial nodes = strain
+  names (Direct/StrainSet) or genotype labels (BRG), phage nodes = phage names; shown when
+  ≥2 strains or ≥2 phages, auto-expanded when edges exist.
+- **Build wiring:** Direct → ONE `with_mutations(...)` call carrying all four kwargs;
+  StrainSet → `set_transition_graph` / `set_phage_mutation_rates` / `set_phage_transition_rates`;
+  BRG → post-build `cfg.<field> = M` via `apply_generator_matrices` (BRG `to_config` HARD-CODES
+  zeros for these three AND forwards `**extra_config_kwargs` to `ModelConfig`, so passing them
+  would raise "multiple values" — post-build assignment is the app-side path, recorded in the
+  repro via the new `rec.assign`). Repro parity asserted for all three modes.
+- **Sweeps:** the `"mutation"` sweep type gained a `field` (default `mutation_rates`); entries
+  for all four matrices (phage ones under the Phage category), mass-conserving apply.
+- **Fit table:** targets for configured (nonzero) transition/phage-generator edges (bounds
+  families added); **and a real fix** — `build_param_spec_v2` now derives every touched
+  generator column's diagonal (`_rebalance_generator_diagonals`: `M[j,j] = −Σ_{i≠j} M[i,j]`,
+  dynamic when any entry is freed/mapped). The pre-existing `mutation_rates[i,j]` targets freed
+  only the off-diagonal, so a fit created/destroyed cells instead of moving them.
+  `_apply_config_to_state` writes fitted generators back into the edge lists
+  (`write_back_generator_matrices`; only graphs already configured; BRG skips mutation).
+- **Snapshot:** "Evolution & phenotypic switching" section (nonzero matrices only).
+- **AI:** `configure_simulator` accepts `transition_graph` / `phage_mutation_graph` /
+  `phage_transition_graph` (any mode). `system_prompt.md` `with_mutations` block rewritten — it
+  was WRONG (said `[i,j] = i→j` and "diagonal ignored / auto-normalised"; the engine is
+  `M[dest, origin]` with an explicit negative diagonal, `_to_nn` does no normalisation) — and now
+  documents all four matrices + `with_transition_function` + the StrainSet setters; prompt-sync
+  guard extended (`with_mutations` signature, StrainSet setters).
+- Docs: USER_GUIDE §4.4b + parameter table row; Help "Resistance" concept. Tests +12
+  (builder_modes ×5 incl. a growth=0 test proving transition ≠ mutation, sweeps, nls_fit ×2,
+  ai_configure, prompt_sync ×2). **300 passing.** `with_transition_function` (a callable)
+  stays scripting-only.
 
 ## Done this session (2026-08-07) — phage 2-compartment PK + central-compartment display
 

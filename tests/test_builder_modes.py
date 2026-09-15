@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from pbisim import PBIModel, solve_ode
 from pbisim.strains import StrainDefinition, StrainSet
 from pbisim.strains.genotypes import BinaryResistanceGenotypes, BacterialStrain, PhageStrain, Antibiotic
@@ -906,3 +907,118 @@ def test_frac_lysis_survives_under_any_nutrient_growth():
     [b for b in a.button if "Run Simulation" in (b.label or "")][0].click().run()
     _lfn = a.session_state["simulation_config"].lysis_progression_function
     assert _lfn is None or _lfn.__name__ != "frac_lysis"   # coerced away from frac_lysis
+
+
+# ── Generator matrices: phenotypic transitions (bacteria) + phage mutation / transitions ──
+
+def _sel(at, label):
+    return [s for s in at.selectbox if label in (s.label or "")][0]
+
+
+@pytest.mark.parametrize("mode", [
+    "Direct (ModelBuilder)",
+    "Binary Genotypes (BRG)",
+    "Custom Strains & Graph (StrainSet)",
+])
+def test_generator_matrices_reach_config_and_repro_in_all_modes(mode):
+    """The engine's transition_rates (bacterial phenotypic switching), mutation_rates_phage
+    and transition_rates_phage generators used to be unreachable from every builder mode.
+    Each mode now wires the shared edge lists (int_bact_transitions / int_phage_mutations /
+    int_phage_transitions) into a mass-conserving M[dest, origin] matrix — via
+    with_mutations (Direct), set_*_graph / set_phage_*_rates (StrainSet) or post-build
+    cfg.<field> (BRG, whose to_config hard-codes zeros) — and the repro script mirrors it."""
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(APP, default_timeout=200)
+    at.run()
+    if mode != "Direct (ModelBuilder)":
+        _sel(at, "Bacterial Population Builder Mode").set_value(mode)
+        at.run()
+    if mode == "Direct (ModelBuilder)":
+        at.session_state["direct_n_strains"] = 2; at.session_state["direct_n_phages"] = 2
+    elif mode == "Custom Strains & Graph (StrainSet)":
+        at.session_state["ss_n_strains"] = 2; at.session_state["ss_n_phages"] = 2
+    else:
+        at.session_state["brg_n_phg_loci"] = 2
+    at.run()
+    strains, phages = at.session_state["int_strains"], at.session_state["int_phages"]
+    bn = ["00", "01", "10", "11"] if mode == "Binary Genotypes (BRG)" else [s["name"] for s in strains]
+    pn = [p["name"] for p in phages]
+    at.session_state["int_bact_transitions"] = [{"from": bn[0], "to": bn[1], "rate": 0.02}]
+    at.session_state["int_phage_mutations"] = [{"from": pn[0], "to": pn[1], "rate": 1e-5}]
+    at.session_state["int_phage_transitions"] = [{"from": pn[1], "to": pn[0], "rate": 0.03}]
+    at.run()
+    assert len(at.exception) == 0, at.exception
+    # the editors render (the expander auto-opens when edges exist)
+    assert any("Add bacterial transition" in (b.label or "") for b in at.button)
+    assert any("Add phage mutation" in (b.label or "") for b in at.button)
+    [b for b in at.button if "Run Simulation" in (b.label or "")][0].click().run()
+    assert len(at.exception) == 0, at.exception
+
+    cfg = at.session_state["simulation_config"]
+    n = len(bn)
+    assert cfg.transition_rates.shape == (n, n)
+    assert cfg.transition_rates[1, 0] == 0.02 and cfg.transition_rates[0, 0] == -0.02
+    assert np.allclose(cfg.transition_rates.sum(axis=0), 0.0)      # mass-conserving
+    assert cfg.mutation_rates_phage[1, 0] == 1e-5 and cfg.mutation_rates_phage[0, 0] == -1e-5
+    assert cfg.transition_rates_phage[0, 1] == 0.03 and cfg.transition_rates_phage[1, 1] == -0.03
+    # the reproduction script builds the same matrices
+    ns = {}
+    exec(compile(at.session_state["_last_repro_code"], "<repro>", "exec"), ns)
+    for fld in ("transition_rates", "mutation_rates_phage", "transition_rates_phage"):
+        assert np.allclose(getattr(ns["cfg"], fld), getattr(cfg, fld)), fld
+    # the snapshot lists the switching section
+    at.session_state["sim_show_cfg"] = True
+    at.run()
+    assert any("phenotypic switching" in (m.value or "") for m in at.markdown)
+
+
+def test_phenotypic_transition_acts_without_growth():
+    """transition_rates is a first-order switch on B itself (growth-independent), unlike
+    mutation_rates which is coupled to division: with growth = 0 a WT→R transition still
+    moves cells, a WT→R mutation does not."""
+    from pbisim import ModelBuilder, PBIModel, solve_ode
+
+    def _run(**mut):
+        cfg = (ModelBuilder(n_bacteria=2, n_phages=1)
+               .with_growth_rates([0.0, 0.0])
+               .with_phage_params(adsorption_rates=[[0.0], [0.0]], burst_sizes=50,
+                                  latent_periods=0.5, phage_decay_rates=0.1)
+               .with_mutations(**mut).build())
+        m = PBIModel(cfg, initial_B=np.array([1e7, 0.0]), initial_P=np.array([0.0]))
+        r = solve_ode(m, t_end=10.0, dt=0.5)
+        return float(r.get("B1")[-1]), float(r.sum_prefixes("B")[-1])
+
+    b1_tr, tot_tr = _run(transition_rates=[[-0.1, 0.0], [0.1, 0.0]])
+    b1_mu, _ = _run(mutation_rates=[[-0.1, 0.0], [0.1, 0.0]])
+    assert b1_tr > 1e6                     # ~63% switched after 10 h at 0.1 h⁻¹
+    assert np.isclose(tot_tr, 1e7, rtol=1e-3)   # conserved, just redistributed
+    assert b1_mu < 1.0                     # no division → no mutation flux
+
+
+def test_rate_graph_helpers_roundtrip():
+    from pbisim_app.common import (rate_matrix_from_graph, edges_from_rate_matrix,
+                                   graph_dict_from_edges, brg_genotype_labels)
+    names = ["A", "B", "C"]
+    edges = [{"from": "A", "to": "B", "rate": 0.1}, {"from": "A", "to": "C", "rate": 0.2},
+             {"from": "C", "to": "A", "rate": 0.05},
+             {"from": "A", "to": "A", "rate": 9.0},          # self-loop ignored
+             {"from": "A", "to": "ZZZ", "rate": 1.0},        # unknown node ignored
+             {"from": "B", "to": "A", "rate": 0.0}]          # zero rate ignored
+    M = rate_matrix_from_graph(edges, names)
+    assert M[1, 0] == 0.1 and M[2, 0] == 0.2 and M[0, 2] == 0.05
+    assert np.isclose(M[0, 0], -0.3) and np.isclose(M[2, 2], -0.05) and M[1, 1] == 0
+    assert np.allclose(M.sum(axis=0), 0.0)
+    assert edges_from_rate_matrix(M, names) == [
+        {"from": "A", "to": "B", "rate": 0.1}, {"from": "A", "to": "C", "rate": 0.2},
+        {"from": "C", "to": "A", "rate": 0.05}]
+    assert graph_dict_from_edges(edges, names) == {"A": {"B": 0.1, "C": 0.2}, "C": {"A": 0.05}}
+    assert rate_matrix_from_graph([], names) is None
+    assert brg_genotype_labels(2, 0) == ["00", "01", "10", "11"]
+    assert brg_genotype_labels(1, 1) == ["phi0_abx0", "phi0_abx1", "phi1_abx0", "phi1_abx1"]
+    assert brg_genotype_labels(0, 1) == ["abx0", "abx1"]
+    # matches the engine's own labelling
+    from pbisim.strains.genotypes import BinaryResistanceGenotypes, BacterialStrain, PhageStrain, Antibiotic
+    brg = BinaryResistanceGenotypes.from_strains(
+        [PhageStrain(name="p")], bacteria=BacterialStrain(base_growth_rate=1.2),
+        antibiotics=[Antibiotic(name="a", emax_s=3.0, ec50_s=0.2, emax_r=0.1, ec50_r=2.0)])
+    assert brg.strain_labels == brg_genotype_labels(1, 1)

@@ -208,15 +208,18 @@ def render_iiv_config(prefix, initial=None):
             "params": params, "mode": mode}
 
 
-def render_mutation_graph_editor(strains, key_prefix):
-    """Edit the named mutation-transition graph (shared `int_transitions`).
+def render_rate_graph_editor(names, state_key, key_prefix, *, rate_label="Rate (h⁻¹)",
+                             default_rate=1e-7, add_label="+ Add edge"):
+    """Edit a named directed rate graph stored as ``st.session_state[state_key]`` =
+    ``[{"from": name, "to": name, "rate": r}, ...]``.
 
-    Each entry is {"from": strain_name, "to": strain_name, "rate": mu}. Works for
-    any number of strains, so it lifts the 2^m restriction of the per-locus shortcut.
+    Generic editor behind every generator-matrix input (bacterial mutation and
+    phenotypic transitions, phage mutation and transitions): ``names`` are the node
+    labels (strain names, BRG genotype labels or phage names). Works for any node count.
     """
-    transitions = st.session_state.get("int_transitions", [])
-    names = [s["name"] for s in strains]
-    for idx, tr in enumerate(list(transitions)):
+    edges = st.session_state.get(state_key, [])
+    names = list(names)
+    for idx, tr in enumerate(list(edges)):
         c1, c2, c3, c4 = st.columns([3, 3, 3, 1])
         with c1:
             tr["from"] = st.selectbox("From", names,
@@ -227,39 +230,149 @@ def render_mutation_graph_editor(strains, key_prefix):
                                     index=names.index(tr["to"]) if tr.get("to") in names else 0,
                                     key=f"{key_prefix}_dest_{idx}")
         with c3:
-            tr["rate"] = st.number_input("Rate (mu)", value=float(tr.get("rate", 1e-7)),
+            tr["rate"] = st.number_input(rate_label, value=float(tr.get("rate", default_rate)),
                                          format="%.2e", key=f"{key_prefix}_rate_{idx}")
         with c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button(":material/delete:", key=f"{key_prefix}_del_{idx}"):
-                transitions.pop(idx)
-                st.session_state.int_transitions = transitions
+                edges.pop(idx)
+                st.session_state[state_key] = edges
                 st.rerun()
-    if st.button("+ Add transition", key=f"{key_prefix}_add"):
-        transitions.append({"from": names[0] if names else "", "to": names[0] if names else "", "rate": 1e-7})
-        st.session_state.int_transitions = transitions
+    if st.button(add_label, key=f"{key_prefix}_add"):
+        edges.append({"from": names[0] if names else "", "to": names[0] if names else "",
+                      "rate": default_rate})
+        st.session_state[state_key] = edges
         st.rerun()
 
 
-def mutation_matrix_from_transitions(transitions, strains):
-    """Build the (n,n) mass-conserving mutation matrix from a named transition graph.
+def render_mutation_graph_editor(strains, key_prefix):
+    """Edit the named bacterial mutation graph (shared `int_transitions`).
 
-    Convention (matches pbisim): M[dest, origin] = rate origin→dest; the diagonal
-    M[o, o] = -(sum of outflows from o). Returns None if there are no valid edges.
+    Each entry is {"from": strain_name, "to": strain_name, "rate": mu}. Works for
+    any number of strains, so it lifts the 2^m restriction of the per-locus shortcut.
     """
-    n = len(strains)
-    name_to_idx = {s["name"]: i for i, s in enumerate(strains)}
+    render_rate_graph_editor([s["name"] for s in strains], "int_transitions", key_prefix,
+                             rate_label="Rate (mu)", add_label="+ Add transition")
+
+
+def rate_matrix_from_graph(edges, names):
+    """Build an (n,n) mass-conserving generator matrix from a named edge list.
+
+    Convention (matches pbisim / ``gen_mat_from_graph``): M[dest, origin] = rate
+    origin→dest; the diagonal M[o, o] = -(sum of outflows from o), so each column sums
+    to zero and the matrix only redistributes (bacteria or phage) between the named
+    states. Edges naming unknown nodes, self-loops and non-positive rates are ignored.
+    Returns None if there are no valid edges (→ the caller leaves the engine default).
+    """
+    names = list(names)
+    n = len(names)
+    name_to_idx = {nm: i for i, nm in enumerate(names)}
     M = np.zeros((n, n))
     any_edge = False
-    for tr in transitions:
+    for tr in edges or []:
         o = name_to_idx.get(tr.get("from"))
         d = name_to_idx.get(tr.get("to"))
-        r = float(tr.get("rate", 0.0))
+        r = float(tr.get("rate", 0.0) or 0.0)
         if o is not None and d is not None and o != d and r > 0:
             M[d, o] += r
             M[o, o] -= r
             any_edge = True
     return M if any_edge else None
+
+
+def graph_dict_from_edges(edges, names):
+    """Edge list → ``{origin: {dest: rate}}`` (the StrainSet ``set_*_graph`` format),
+    keeping only valid origin→dest edges between the given node names."""
+    names = set(names)
+    graph = {}
+    for tr in edges or []:
+        src, dest = tr.get("from"), tr.get("to")
+        r = float(tr.get("rate", 0.0) or 0.0)
+        if src in names and dest in names and src != dest and r > 0:
+            graph.setdefault(src, {})[dest] = r
+    return graph
+
+
+def mutation_matrix_from_transitions(transitions, strains):
+    """Build the (n,n) mass-conserving mutation matrix from a named transition graph
+    (see :func:`rate_matrix_from_graph`). Returns None if there are no valid edges."""
+    return rate_matrix_from_graph(transitions, [s["name"] for s in strains])
+
+
+def brg_genotype_labels(n_phages, n_antibiotics):
+    """Genotype labels of a Binary-Genotypes model with ``n_phages`` phage loci and
+    ``n_antibiotics`` antibiotic loci, in the engine's ordering (mirrors
+    ``BinaryResistanceGenotypes.strain_labels``: ``'00'``… without antibiotics,
+    ``'phi00_abx0'``… with, ``'abx0'``… when there are no phages)."""
+    import itertools
+    labels = []
+    for comb in itertools.product([0, 1], repeat=n_phages + n_antibiotics):
+        if n_antibiotics == 0:
+            labels.append("".join(map(str, comb)))
+        else:
+            p_lbl = "".join(map(str, comb[:n_phages]))
+            a_lbl = "".join(map(str, comb[n_phages:]))
+            labels.append(f"phi{p_lbl}_abx{a_lbl}" if n_phages > 0 else f"abx{a_lbl}")
+    return labels
+
+
+# Session keys of the four generator-matrix edge lists (all ``int_*`` → captured by
+# scenario snapshots). ``int_transitions`` is the (historically named) bacterial
+# MUTATION graph; the other three are new (2026-09).
+GENERATOR_GRAPH_KEYS = {
+    "mutation_rates": "int_transitions",             # bacteria: division-coupled mutation
+    "transition_rates": "int_bact_transitions",      # bacteria: phenotypic switching (h⁻¹)
+    "mutation_rates_phage": "int_phage_mutations",   # phage: mutation at lysis (per burst)
+    "transition_rates_phage": "int_phage_transitions",  # phage: phenotypic switching (h⁻¹)
+}
+
+
+def edges_from_rate_matrix(M, names):
+    """Inverse of :func:`rate_matrix_from_graph`: the positive off-diagonal entries of a
+    generator matrix as a named edge list (``M[dest, origin]`` → ``origin→dest``)."""
+    names = list(names)
+    M = np.asarray(M, dtype=float)
+    edges = []
+    if M.ndim != 2 or M.shape != (len(names), len(names)):
+        return edges
+    for o in range(len(names)):
+        for d in range(len(names)):
+            if o != d and M[d, o] > 0:
+                edges.append({"from": names[o], "to": names[d], "rate": float(M[d, o])})
+    return edges
+
+
+def write_back_generator_matrices(cfg, bact_names, phage_names, *, include_mutation=True):
+    """Write a (fitted) config's generator matrices back into the session edge lists so
+    the builder shows the estimated rates. A graph is rewritten only when it was already
+    configured (its edge list is non-empty) — an empty graph stays the engine default.
+    ``include_mutation=False`` skips the bacterial mutation graph (BRG derives its
+    mutation matrix from the per-locus μ, not from ``int_transitions``)."""
+    for fld, key in GENERATOR_GRAPH_KEYS.items():
+        if fld == "mutation_rates" and not include_mutation:
+            continue
+        if not st.session_state.get(key):
+            continue
+        M = getattr(cfg, fld, None)
+        if M is None:
+            continue
+        names = phage_names if fld.endswith("_phage") else bact_names
+        edges = edges_from_rate_matrix(M, names)
+        if edges:
+            st.session_state[key] = edges
+
+
+def generator_matrices_from_state(bact_names, phage_names):
+    """Resolve the three NON-mutation generator matrices (bacterial phenotypic
+    transitions, phage mutation, phage transitions) from session state as
+    ``{config_field: matrix-or-None}`` — None where the graph has no valid edge, so the
+    caller can leave the engine's zero default untouched."""
+    g = st.session_state.get
+    return {
+        "transition_rates": rate_matrix_from_graph(g("int_bact_transitions", []), bact_names),
+        "mutation_rates_phage": rate_matrix_from_graph(g("int_phage_mutations", []), phage_names),
+        "transition_rates_phage": rate_matrix_from_graph(g("int_phage_transitions", []), phage_names),
+    }
 
 
 # ── Cached calibration data processing ────────────────────────────────────────
@@ -326,6 +439,9 @@ def _init_app_state():
     # Custom builders states
     if "int_transitions" not in st.session_state:
         st.session_state.int_transitions = []
+    for _gk in ("int_bact_transitions", "int_phage_mutations", "int_phage_transitions"):
+        if _gk not in st.session_state:
+            st.session_state[_gk] = []
     if "int_brg_initial_B" not in st.session_state:
         st.session_state.int_brg_initial_B = {}
         
@@ -510,11 +626,12 @@ def load_preset_to_state(params: dict):
     #    ss_*, trans_*, direct_*), and the mode/signal selector widgets (widget_*).
     _clear_prefixes = (
         "strain_", "phage_", "abx_", "dose_", "ads_",
-        "int_brg_", "brg_", "ss_", "str_", "direct_", "trans_", "widget_",
+        "int_brg_", "brg_", "ss_", "str_", "direct_", "trans_", "widget_", "gen_",
     )
     keys_to_clear = [
         k for k in st.session_state.keys()
-        if any(k.startswith(p) for p in _clear_prefixes) or k == "int_transitions"
+        if any(k.startswith(p) for p in _clear_prefixes)
+        or k in ("int_transitions", "int_bact_transitions", "int_phage_mutations", "int_phage_transitions")
     ]
     for k in keys_to_clear:
         st.session_state.pop(k, None)
@@ -801,6 +918,23 @@ def apply_ai_configuration(config: dict) -> str:
             st.session_state["int_builder_mode"] = "Direct (ModelBuilder)"
             summary = configure_summary(config)
 
+        # Generator graphs (any mode): bacterial phenotypic transitions + phage mutation /
+        # transitions. Nodes are strain names (BRG: genotype labels) / phage names.
+        _gen_bits = []
+        for _ck, _sk, _lab in (("transition_graph", "int_bact_transitions", "phenotypic transition"),
+                               ("phage_mutation_graph", "int_phage_mutations", "phage mutation"),
+                               ("phage_transition_graph", "int_phage_transitions", "phage transition")):
+            _edges = [
+                {"from": g.get("from", ""), "to": g.get("to", ""), "rate": float(g.get("rate", 0.0) or 0.0)}
+                for g in (config.get(_ck) or [])
+                if g.get("from") and g.get("to")
+            ]
+            st.session_state[_sk] = _edges
+            if _edges:
+                _gen_bits.append(f"{len(_edges)} {_lab} edge(s)")
+        if _gen_bits:
+            summary += ", " + ", ".join(_gen_bits)
+
         return f"Configured the Interactive Simulator — {summary}; t_end={config.get('t_end', 48.0)} h."
     except Exception as e:
         return f"ERROR applying configuration: {e}"
@@ -899,6 +1033,7 @@ _SCENARIO_WIDGET_PREFIXES = (
     "int_", "str_", "phg_", "ss_", "brg_", "abx_", "ads_", "dose_",
     "rep_dose", "single_dose", "new_arm", "trial_phg", "trial_abx",
     "widget_builder_mode",
+    "trans_", "dir_trans_", "gen_",   # rate-graph editor widgets (mutation / transitions)
 )
 
 
@@ -1179,6 +1314,15 @@ def render_model_snapshot(container=None, *, snapshot: dict | None = None):
         ("Latent period (h)", _ga("latent_periods")),
         ("Phage decay (h⁻¹)", _ga("phage_decay_rates")),
         ("Dormant attenuation", _ga("attenuation_rate")),
+    ])
+    def _nz(name):   # generator matrices: show only when some rate is set
+        v = _ga(name)
+        return v if v is not None and np.any(np.asarray(v, dtype=float) != 0) else None
+    _section("Evolution & phenotypic switching (generator matrices, M[dest, origin])", [
+        ("Bacterial mutation (per division)", _nz("mutation_rates")),
+        ("Bacterial phenotypic transitions (h⁻¹)", _nz("transition_rates")),
+        ("Phage mutation (per burst)", _nz("mutation_rates_phage")),
+        ("Phage phenotypic transitions (h⁻¹)", _nz("transition_rates_phage")),
     ])
     if imm_on:
         _section("Host immunity", [
@@ -1760,6 +1904,20 @@ def set_diffusion_functions(config, sig, rec=None):
     return config
 
 
+def apply_generator_matrices(config, bact_names, phage_names, rec=None):
+    """Set the bacterial phenotypic-transition and phage mutation / transition generator
+    matrices directly on a built ``ModelConfig`` (BRG's ``to_config`` hard-codes zeros
+    for them). Fields whose graph has no valid edge are left untouched. Mirrored into
+    the reproduction script via ``rec`` as plain ``cfg.<field> = np.array(...)`` lines."""
+    for fld, M in generator_matrices_from_state(bact_names, phage_names).items():
+        if M is None:
+            continue
+        setattr(config, fld, M)
+        if rec is not None:
+            rec.assign("cfg", fld, M)
+    return config
+
+
 def apply_diffusion_signal(config, strains, rec=None):
     """StrainSet/Direct: set the depth-diffusion functions from the first dormancy-enabled
     strain's ``diffusion_signal``. No-op when no strain has dormancy on."""
@@ -1954,6 +2112,11 @@ class _ReproRecorder:
         ``brg.equilibrium_initial_condition(...)`` call) instead of a literal dump."""
         self._render_of[id(value)] = source
         return value
+
+    def assign(self, var, attr, value):
+        """`var.attr = <value>` — a post-build field assignment on a config object
+        (for fields a builder's ``to_config`` can't take)."""
+        self.lines.append(f"{var}.{attr} = {self.render(value)}")
 
 
 def build_nominal_config_from_gui():
@@ -2199,12 +2362,21 @@ def build_nominal_config_from_gui():
         # Mutations. A custom mutation-network graph (any n_bacteria) takes
         # precedence; otherwise fall back to the per-phage-locus shortcut, which
         # pbisim only supports when n_bacteria == 2**n_phages.
+        _mut_kwargs = {}
         _mut_M = mutation_matrix_from_transitions(st.session_state.get("int_transitions", []), strains)
         if _mut_M is not None:
-            builder = rec.call("builder", builder, "with_mutations", mutation_rates=_mut_M)
+            _mut_kwargs["mutation_rates"] = _mut_M
         elif n_phages > 0 and n_bacteria == 2**n_phages:
             phg_res_rates = st.session_state.get("direct_phg_res_rates", [1e-7] * n_phages)
-            builder = rec.call("builder", builder, "with_mutations", phage_resistance_rates=phg_res_rates)
+            _mut_kwargs["phage_resistance_rates"] = phg_res_rates
+        # Phenotypic transitions (bacteria, growth-independent switching) + the phage
+        # mutation / transition generators — the same with_mutations call takes all four.
+        for _fld, _M in generator_matrices_from_state(
+                [s["name"] for s in strains], [p["name"] for p in phages]).items():
+            if _M is not None:
+                _mut_kwargs[_fld] = _M
+        if _mut_kwargs:
+            builder = rec.call("builder", builder, "with_mutations", **_mut_kwargs)
             
         # Antibiotics
         for abx in antibiotics:
@@ -2471,6 +2643,11 @@ def build_nominal_config_from_gui():
         if dormancy_enabled:
             config = set_diffusion_functions(
                 config, st.session_state.get("int_diffusion_signal", "constant"), rec=rec)
+        # Likewise BRG.to_config hard-codes zero phenotypic-transition / phage generator
+        # matrices (its mutation matrix comes from the per-locus μ) — set them post-build.
+        # Bacterial nodes are the genotype labels, phage nodes the locus names.
+        config = apply_generator_matrices(
+            config, brg.strain_labels, [p["name"] for p in phages], rec=rec)
 
         # Resolve initial densities
         if st.session_state.get("int_brg_use_eq_ic", False):
@@ -2570,19 +2747,20 @@ def build_nominal_config_from_gui():
                 )
             )
 
-        # Build mutation graph
-        transitions = st.session_state.get("int_transitions", [])
-        graph_dict = {}
-        for trans in transitions:
-            src = trans["from"]
-            dest = trans["to"]
-            rate = trans["rate"]
-            if src and dest:
-                if src not in graph_dict:
-                    graph_dict[src] = {}
-                graph_dict[src][dest] = rate
+        # Build mutation graph (+ the phenotypic-transition graph and the phage
+        # mutation / transition generators via StrainSet's dedicated setters).
+        _ss_names = [s["name"] for s in strains]
+        graph_dict = graph_dict_from_edges(st.session_state.get("int_transitions", []), _ss_names)
         if graph_dict:
             rec.mutate("ss", ss, "set_mutation_graph", graph_dict)
+        _tr_graph = graph_dict_from_edges(st.session_state.get("int_bact_transitions", []), _ss_names)
+        if _tr_graph:
+            rec.mutate("ss", ss, "set_transition_graph", _tr_graph)
+        _gen = generator_matrices_from_state(_ss_names, [p["name"] for p in phages])
+        if _gen["mutation_rates_phage"] is not None:
+            rec.mutate("ss", ss, "set_phage_mutation_rates", _gen["mutation_rates_phage"])
+        if _gen["transition_rates_phage"] is not None:
+            rec.mutate("ss", ss, "set_phage_transition_rates", _gen["transition_rates_phage"])
             
         # Phage PK
         phage_pk_config = None
@@ -3187,6 +3365,15 @@ __all__ = [
     'render_iiv_config',
     'render_mutation_graph_editor',
     'mutation_matrix_from_transitions',
+    'render_rate_graph_editor',
+    'rate_matrix_from_graph',
+    'graph_dict_from_edges',
+    'brg_genotype_labels',
+    'GENERATOR_GRAPH_KEYS',
+    'generator_matrices_from_state',
+    'apply_generator_matrices',
+    'edges_from_rate_matrix',
+    'write_back_generator_matrices',
     'read_uploaded_csv',
     'calibration_processed',
     'arm_dose_events',

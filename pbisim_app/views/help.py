@@ -144,7 +144,10 @@ def render():
             "antibiotic) with cross-resistance / collateral-sensitivity, or **Custom Strains** for "
             "an arbitrary strain + mutation graph. Never start a resistant strain at exactly 0 — "
             "mutation flux vanishes when growth stops, so seed it at "
-            "`max(mutation_rate × B₀, ~10)`.")
+            "`max(mutation_rate × B₀, ~10)`. Growth-**independent** switching (persisters, "
+            "phase variation) is a *phenotypic transition* (h⁻¹, applied to the population "
+            "directly) — set it, and phage mutation / transition graphs, in the "
+            "**Phenotypic transitions & phage evolution** expander below the builder columns.")
 
     # ── Troubleshooting ───────────────────────────────────────────────────────
     st.markdown("### Troubleshooting")

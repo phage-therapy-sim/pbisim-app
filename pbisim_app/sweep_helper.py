@@ -157,29 +157,50 @@ def get_sweep_parameters(config, strains=None, phages=None, antibiotics=None) ->
             "index": i,
         }
 
-    # 2b. Strain→strain mutation rates (resistance evolution). Mass-conserving:
-    # sweeping origin→dest rebalances the origin column's diagonal (see the
-    # "mutation" handler in apply_sweep_parameter).
-    if config.n_bacteria > 1 and getattr(config, "mutation_rates", None) is not None:
+    # 2b. Strain→strain generator rates: mutation (per division) and phenotypic
+    # transitions (h⁻¹, growth-independent). Mass-conserving: sweeping origin→dest
+    # rebalances the origin column's diagonal (see the "mutation" handler in
+    # apply_sweep_parameter, which serves every generator matrix via meta["field"]).
+    if config.n_bacteria > 1:
         def _sname(k):
             if strains and k < len(strains):
                 return strains[k]["name"]
             if getattr(config, "strain_labels", None) and k < len(config.strain_labels):
                 return config.strain_labels[k]
             return f"Strain {k}"
-        for _o in range(config.n_bacteria):
-            for _d in range(config.n_bacteria):
-                if _o == _d:
-                    continue
-                params[f"Mutation Rate - {_sname(_o)} → {_sname(_d)}"] = {
-                    "type": "mutation", "origin": _o, "dest": _d, "default": 1e-7,
-                }
+        for _fld, _lab, _dflt in (("mutation_rates", "Mutation Rate", 1e-7),
+                                  ("transition_rates", "Phenotypic Transition Rate", 0.01)):
+            if getattr(config, _fld, None) is None:
+                continue
+            for _o in range(config.n_bacteria):
+                for _d in range(config.n_bacteria):
+                    if _o == _d:
+                        continue
+                    params[f"{_lab} - {_sname(_o)} → {_sname(_d)}"] = {
+                        "type": "mutation", "field": _fld, "origin": _o, "dest": _d,
+                        "default": _dflt,
+                    }
 
     # 3. Phage-specific parameters
+    def _pname(j):
+        return f"Phage {j} ({phages[j]['name']})" if phages and j < len(phages) else f"Phage {j}"
+    # 3a. Phage→phage generator rates: mutation (per burst) and phenotypic transitions
+    # (h⁻¹ on free phage) — same mass-conserving "mutation" handler, keyed by field.
+    if config.n_phages > 1:
+        for _fld, _lab, _dflt in (("mutation_rates_phage", "Phage Mutation Rate", 1e-6),
+                                  ("transition_rates_phage", "Phage Transition Rate", 0.01)):
+            if getattr(config, _fld, None) is None:
+                continue
+            for _o in range(config.n_phages):
+                for _d in range(config.n_phages):
+                    if _o == _d:
+                        continue
+                    params[f"{_lab} - {_pname(_o)} → {_pname(_d)}"] = {
+                        "type": "mutation", "field": _fld, "origin": _o, "dest": _d,
+                        "default": _dflt,
+                    }
     for j in range(config.n_phages):
-        phage_name = f"Phage {j}"
-        if phages and j < len(phages):
-            phage_name = f"Phage {j} ({phages[j]['name']})"
+        phage_name = _pname(j)
 
         params[f"Phage Decay Rate - {phage_name}"] = {
             "type": "array1d",
@@ -418,7 +439,7 @@ def sweep_category(label: str, meta: dict) -> str:
     if t in ("prerun", "dimension"):
         return "Structure & pre-run"
     if t == "mutation":
-        return "Bacterial"
+        return "Phage" if field.endswith("_phage") else "Bacterial"
     if field.startswith("imm_") or "Immune" in label:
         return "Immune"
     if field in ("monod_constant", "carrying_capacity", "recycle_fraction", "s_in", "s_out",
@@ -562,16 +583,18 @@ def apply_sweep_parameter(val: float, meta: dict, config, initial_B, initial_P, 
         initial_S = val
 
     elif param_type == "mutation":
-        # Strain→strain mutation rate. mutation_rates is a mass-conserving generator
-        # (Bc = B + M@B, each column sums to 0), so set the off-diagonal origin→dest
-        # entry and rebalance that column's diagonal, keeping total bacteria conserved.
-        M = np.copy(config.mutation_rates)
+        # Origin→dest rate of a generator matrix (mutation_rates / transition_rates /
+        # mutation_rates_phage / transition_rates_phage — meta["field"], default the
+        # bacterial mutation matrix). Each column sums to 0 (mass conservation), so set
+        # the off-diagonal entry and rebalance that column's diagonal.
+        fld = meta.get("field", "mutation_rates")
+        M = np.copy(getattr(config, fld))
         o, d = meta["origin"], meta["dest"]
         M[d, o] = val
         col = M[:, o].copy()
         col[o] = 0.0
         M[o, o] = -float(np.sum(col))
-        config = dataclasses.replace(config, mutation_rates=M)
+        config = dataclasses.replace(config, **{fld: M})
 
     elif param_type == "prerun":
         # Not a ModelConfig field — the app applies the pre-run (stationary_phase_ic)

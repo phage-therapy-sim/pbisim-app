@@ -34,7 +34,7 @@ def _apply_arm_covariates(config, cov):
 # or ``direct_phg_res_rates`` (mutation list), which must survive. Popping these on
 # fit-apply forces the builder inputs to re-seed from the updated int_* dicts.
 _BUILDER_WIDGET_PREFIXES = (
-    "str_", "ss_", "phg_", "brg_", "trans_", "direct_mu_",
+    "str_", "ss_", "phg_", "brg_", "trans_", "dir_trans_", "gen_", "direct_mu_",
     "ads_input_", "ads_dorm_input_",
     "widget_builder_mode", "widget_density_total_cells", "widget_brg_",
 )
@@ -161,6 +161,12 @@ def _apply_config_to_state(cfg):
         phages[0]["initial_P"] = float(_ip)
     st.session_state["int_strains"] = strains
     st.session_state["int_phages"] = phages
+    # Generator matrices (mutation / phenotypic-transition graphs) — rewrite the edge
+    # lists the builder was already using so estimated rates show up in the editors.
+    _brg = st.session_state.get("int_builder_mode") == "Binary Genotypes (BRG)"
+    _bn = (brg_genotype_labels(len(phages), len(st.session_state.get("int_antibiotics", [])))
+           if _brg else [s["name"] for s in strains])
+    write_back_generator_matrices(cfg, _bn, [p["name"] for p in phages], include_mutation=not _brg)
 
 
 def _broadcast_growth(inits, n_bacteria):

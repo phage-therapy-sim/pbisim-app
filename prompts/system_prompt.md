@@ -235,15 +235,30 @@ builder.with_phage_params(
 )
 ```
 
-### `.with_mutations(mutation_rates=...)`
+### `.with_mutations(...)` — mutation AND phenotypic-transition generator matrices
+All four matrices are mass-conserving **generators** with the SAME convention:
+`M[dest, origin] > 0` = rate from `origin` INTO `dest`; the diagonal `M[o, o]` MUST be
+`-(sum of the outflows from o)` (each column sums to 0). The diagonal is NOT auto-filled.
 ```python
-# mutation_rates[i, j] = per-replication probability of strain i → strain j
-# Shape: (n_bacteria, n_bacteria).  Diagonal is ignored (auto-normalised).
 builder.with_mutations(
-    mutation_rates=np.array([[0.0,  1e-7],   # strain 0 → strain 1 at rate 1e-7
-                             [0.0,  0.0]])   # resistant strain does not back-mutate
+    # bacteria, coupled to DIVISION (per replication; vanishes when growth stops):
+    mutation_rates=np.array([[-1e-7, 0.0],    # column 0: WT loses 1e-7 per division
+                             [ 1e-7, 0.0]]),  # row 1: ...which lands in the resistant strain
+    # bacteria, growth-INDEPENDENT phenotypic switching (h⁻¹; persister / phase variation,
+    # acts even in stationary phase — applied to B directly):
+    transition_rates=np.array([[-0.02, 0.1],
+                               [ 0.02, -0.1]]),      # 0→1 at 0.02 h⁻¹, 1→0 at 0.1 h⁻¹
+    # phage generators, shape (n_phages, n_phages):
+    mutation_rates_phage=None,     # applied to the lysis yield (fraction of each burst)
+    transition_rates_phage=None,   # applied to free phage (h⁻¹)
 )
+# Shortcut for the binary-genotype layout (n_bacteria == 2**n_phages): one μ per phage
+# builds the full mass-conserving matrix — mutually exclusive with mutation_rates.
+builder.with_mutations(phage_resistance_rates=[1e-7])
 ```
+Dynamic (state-dependent) switching: `.with_transition_function(fn)` with
+`fn(S, B, P, cfg) -> (n, n)` matrix ADDED to `transition_rates` at every ODE step
+(e.g. phage-load-induced resistance switching).
 
 ### `.with_nutrient(...)`
 ```python
@@ -678,6 +693,9 @@ def strain(name, growth, ads):
 ss.add_strain(strain("WT", 1.2, 1e-8))
 ss.add_strain(strain("resistant", 1.1, 0.0))          # phage cannot adsorb
 ss.set_mutation_graph({"WT": {"resistant": 1e-7}})    # WT → resistant per replication
+# Optional generators (same names → gen_mat_from_graph builds the mass-conserving matrix):
+# ss.set_transition_graph({"WT": {"resistant": 0.02}})   # phenotypic switching, h⁻¹
+# ss.set_phage_mutation_rates(M)  /  ss.set_phage_transition_rates(M)   # (m, m) generators
 
 # to_config REQUIRES these keyword-only args even when immunity is off (set to 0/defaults):
 cfg = ss.to_config(

@@ -50,6 +50,9 @@ _FAMILY = {
     "latent_periods": (0.1, 3.0, False),
     "phage_decay_rates": (0.01, 2.0, False),
     "mutation_rates": (1e-9, 1e-4, True),
+    "transition_rates": (1e-4, 10.0, True),          # phenotypic switching, h⁻¹
+    "mutation_rates_phage": (1e-9, 1e-2, True),      # per burst
+    "transition_rates_phage": (1e-4, 10.0, True),    # h⁻¹ on free phage
     "debris_u": (0.01, 1.0, False),
     "debris_v": (0.001, 1.0, False),
     "debris_kdis": (0.001, 5.0, False),
@@ -223,12 +226,27 @@ def available_targets(config, initial_cfu=None, initial_pfu=None, builder_mode=N
         if _inc_per_phage:   # per-phage infected-cell nutrient draw (nutrient-tracking models)
             add(f"Infected-cell nutrient consumption — phage {j} (×)",
                 f"infected_nutrient_consumption[{j}]", "infected_nutrient_consumption")
-    # mutation network (off-diagonal transitions only)
+    # mutation network (off-diagonal entries only; the diagonal is derived — see
+    # build_param_spec_v2's mass-conservation rebalance)
     if getattr(config, "mutation_rates", None) is not None:
         for i in range(nb):
             for j in range(nb):
                 if i != j:
                     add(f"Mutation rate — strain {j} → {i}", f"mutation_rates[{i},{j}]", "mutation_rates")
+    # phenotypic transitions (bacteria) + phage mutation / transition generators: only
+    # the edges the model actually configures (nonzero), so the table doesn't bloat
+    # with every possible pair.
+    for _fld, _lab, _node, _n in (("transition_rates", "Phenotypic transition", "strain", nb),
+                                  ("mutation_rates_phage", "Phage mutation", "phage", npg),
+                                  ("transition_rates_phage", "Phage transition", "phage", npg)):
+        _M = getattr(config, _fld, None)
+        if _M is None or _n < 2:
+            continue
+        _M = np.asarray(_M, dtype=float)
+        for i in range(_n):
+            for j in range(_n):
+                if i != j and _M.shape == (_n, _n) and _M[i, j] != 0:
+                    add(f"{_lab} — {_node} {j} → {i}", f"{_fld}[{i},{j}]", _fld)
     # debris (OD) — only when the module is on
     if getattr(config, "debris_u", None) is not None:
         add("Debris yield from deaths (u)", "debris_u", "debris_u")
@@ -308,6 +326,52 @@ def validate_expr(expr, theta_names):
         return True, ""
     except Exception as e:
         return False, str(e)
+
+
+_GENERATOR_FIELDS = ("mutation_rates", "transition_rates",
+                     "mutation_rates_phage", "transition_rates_phage")
+
+
+def _generator_entry(path):
+    """``(field, i, j)`` when ``path`` is an OFF-diagonal entry of one of the engine's
+    generator matrices (``mutation_rates[i,j]`` etc.), else ``None``."""
+    m = _re.match(r"^(\w+)\[(\d+),(\d+)\]$", str(path))
+    if not m or m.group(1) not in _GENERATOR_FIELDS:
+        return None
+    i, j = int(m.group(2)), int(m.group(3))
+    return None if i == j else (m.group(1), i, j)
+
+
+def _rebalance_generator_diagonals(rp, base_config, dyn, fixed):
+    """Keep every touched generator column mass-conserving: for each column ``j`` of a
+    generator matrix with a freed / mapped / re-fixed off-diagonal entry, bind the
+    diagonal ``M[j,j]`` to ``-Σ_{i≠j} M[i,j]`` (dynamic when any entry is estimated,
+    a fixed value otherwise). Untouched entries keep their base-config value.
+
+    Convention (pbisim): ``M[dest, origin]`` ≥ 0 off-diagonal, ``M[o,o]`` = −outflow."""
+    cols = {}
+    for (fld, i, j) in list(dyn) + list(fixed):
+        cols.setdefault((fld, j), set()).add(i)
+    for (fld, j) in cols:
+        M = np.asarray(getattr(base_config, fld), dtype=float)
+        n = M.shape[0]
+        getters, any_dyn = [], False
+        for i in range(n):
+            if i == j:
+                continue
+            key = (fld, i, j)
+            if key in dyn:
+                getters.append(dyn[key]); any_dyn = True
+            elif key in fixed:
+                getters.append(lambda tt, v=fixed[key]: v)
+            else:
+                getters.append(lambda tt, v=float(M[i, j]): v)
+        diag = f"{fld}[{j},{j}]"
+        if any_dyn:
+            rp = rp.set(diag, (lambda tt, gs=tuple(getters): -sum(g(tt) for g in gs)))
+        else:
+            rp = rp.fix(diag, -sum(g(None) for g in getters))
+    return rp
 
 
 def _make_expr_fn(expr, theta_names):
@@ -904,12 +968,19 @@ def build_param_spec_v2(base_config, targets, thetas=None, mappings=None,
                       initial=(float(init) if init not in (None, "")
                                else _safe_initial(th["lo"], th["hi"], _log, _fallback)),
                       prior=_prior(th))
+    # Off-diagonal generator-matrix entries (mutation_rates[i,j], transition_rates[i,j],
+    # …_phage[i,j]) touched by the spec: (field, i, j) → getter(tt) (dynamic) or float
+    # (fixed). Each column of a generator must sum to zero, so its diagonal is DERIVED
+    # from the off-diagonals below (a freed origin→dest rate would otherwise create or
+    # destroy cells/phage instead of moving them).
+    _gen_dyn, _gen_fixed = {}, {}
     for k, t in enumerate(targets):
         p = t["path"]
         if p in mapped_paths:
             continue
         if estimate_b0 in ("shared", "per_arm") and p == "fit_initial_cfu":
             continue  # handled by free_initial_conditions below (the B0-source radio)
+        _ge = _generator_entry(p)
         if t.get("free"):
             nm = f"free{k}"
             _log = bool(t.get("log"))
@@ -917,6 +988,8 @@ def build_param_spec_v2(base_config, targets, thetas=None, mappings=None,
                           initial=_safe_initial(t["lo"], t["hi"], _log, t["value"]),
                           prior=_prior(t))
             rp = rp.set(p, (lambda tt, n=nm: getattr(tt, n)))
+            if _ge:
+                _gen_dyn[_ge] = (lambda tt, n=nm: getattr(tt, n))
         else:
             # fixed: pin only when the value differs from the base config. Params that
             # can't be read from the config are pbisim-fit-side virtuals (fitness_cost,
@@ -925,10 +998,17 @@ def build_param_spec_v2(base_config, targets, thetas=None, mappings=None,
             try:
                 if abs(float(t["value"]) - _get_path(base_config, p)) > 1e-30:
                     rp = rp.fix(p, float(t["value"]))
+                    if _ge:
+                        _gen_fixed[_ge] = float(t["value"])
             except Exception:
                 pass
     for m in mappings:
-        rp = rp.set(m["path"], _make_expr_fn(m["expr"], theta_names))
+        _fn = _make_expr_fn(m["expr"], theta_names)
+        rp = rp.set(m["path"], _fn)
+        _ge = _generator_entry(m["path"])
+        if _ge:
+            _gen_dyn[_ge] = _fn
+    rp = _rebalance_generator_diagonals(rp, base_config, _gen_dyn, _gen_fixed)
     if estimate_b0 in ("shared", "per_arm") and dataset is not None:
         from pbisim_fit import free_initial_conditions
         rp = free_initial_conditions(rp, dataset, cfu=estimate_b0)
