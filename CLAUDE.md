@@ -246,6 +246,24 @@ restore, invalid-cookie, sign-out suppression).
 - Preset `script_code` strings for type="single" presets (01–10, 13) are reference
   only — they are not executed. Any API mismatch there is cosmetic but should be fixed.
 
+## Done this session (2026-09-16) — phage PK + immunity "Solver Error"s: engine fix (no app change)
+
+Owner: frequent integration errors when phage PK and the immune module are both on. A 24-combo
+AppTest matrix (3 modes × 2 PK modes × innate/hill × dormancy) passed at defaults, so a 150-trial
+randomized engine sweep was used instead → 3 BDF failures, one of them the reported class:
+**mass-conserving PK + innate immunity + `extinction_threshold=1.0`** fails on BDF and *hangs*
+Radau/LSODA; passes with `extinction_threshold=None` / `phage_noise_floor=0`. Root cause was in
+the engine (`solve_ode` phage-lineage checks ignored `Pc`/`Pp` — fixed in pbisim `4a5a7ce`, see
+`pbisim/CHANGELOG.md`); the app's only role is that its default `extinction_threshold=1.0` sets a
+1 PFU/mL floor, which widens the chatter band. **No app code changed**; 300 tests pass against the
+patched engine, the 24-combo matrix still passes.
+- **Second class (not fixed):** scipy **BDF fails instantly at a dose junction for a site bolus ≥
+  1e10 PFU/mL** (the same amount as an initial condition passes; Radau/LSODA always pass; the
+  `h < spacing` check can't fire at t=0, which is why the IC case "recovers"). Proposal pending
+  owner decision: in `run_sim_from_gui_params` (and the sweep/trial solve paths) catch the
+  `RuntimeError` and re-solve Radau → LSODA with a visible caption.
+- Diagnostic scripts live only in the session scratchpad (not committed).
+
 ## Done this session (2026-09-15) — generator matrices: phenotypic transitions + phage mutation/transitions
 
 Owner: "the app doesn't incorporate transition matrices applied to bacteria or phages." Confirmed:
