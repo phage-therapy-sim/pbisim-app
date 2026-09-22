@@ -1666,7 +1666,8 @@ def growth_tracks_nutrients() -> bool:
 
 # Death-signal options → pbisim death function name. constant_death (default) is the
 # flat rate d that the app used all along; nutrient = starvation d·(1−S/(Ks+S));
-# density = crowding d·min(1, ΣB/K). (No nutrient+density death function exists.)
+# density = crowding d·(ΣB/K) — uncapped, so d is the death rate AT ΣB=K, not a maximum
+# (pbisim 2026-09: the min(1, ·) cap was removed from every rising density signal).
 DEATH_SIGNALS = {
     "constant":                     "constant_death",
     "nutrient (starvation)":        "nutrient_dependent_death",

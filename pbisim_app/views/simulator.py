@@ -172,7 +172,8 @@ def render_model_builder(inoculum_mode="magnitude"):
         "Death signal function", _dth_labels, index=_dth_labels.index(_dth_cur_label),
         help="How the per-strain natural death rate dB is modulated:  constant = flat rate d "
              "(the previous behaviour);  nutrient = starvation d·(1−S/(Ks+S)) (rises as nutrients "
-             "deplete);  density = crowding d·min(1, ΣB/K). Note: starvation death only separates "
+             "deplete);  density = crowding d·(ΣB/K), uncapped — d is the rate AT ΣB=K, not a "
+             "maximum. Note: starvation death only separates "
              "stationary from death phase when nutrients persist at a low plateau (recycling).")
     st.session_state["int_death_function"] = DEATH_SIGNALS[_dth_choice]
 
@@ -255,7 +256,9 @@ def render_model_builder(inoculum_mode="magnitude"):
                     "Dormancy density threshold (CFU·mL⁻¹)",
                     value=float(st.session_state.get("int_dormancy_carrying_capacity", 1e8) or 1e8),
                     min_value=0.0, format="%.2e",
-                    help="Density threshold for the density dormancy signal (rate ∝ ΣB/K_dorm). "
+                    help="Reference density for the density dormancy signal (rate = dormancy_rate·ΣB/K_dorm, "
+                         "uncapped — so dormancy_rate is the entry rate AT ΣB=K_dorm, not a maximum, and "
+                         "entry overtakes growth once ΣB/K_dorm > growth_rate/dormancy_rate). "
                          "0 = inherit the growth carrying capacity.")
 
     # What "density" counts for ALL density signals (dormancy / resuscitation / death).
@@ -264,7 +267,7 @@ def render_model_builder(inoculum_mode="magnitude"):
         value=bool(st.session_state.get("int_density_total_cells", False)),
         key="widget_density_total_cells",
         help="Off (default): density-dependent signals use ACTIVE bacteria only, "
-             "min(1, ΣB/K). On: they use TOTAL cell density including infected (I), "
+             "ΣB/K. On: they use TOTAL cell density including infected (I), "
              "dormant (D) and hibernating (H) cells — so all compartments count toward "
              "crowding. Applies to every density / nutrient+density dormancy, "
              "resuscitation and death signal.")
