@@ -14,6 +14,7 @@ This directory ships everything needed:
 | `render.yaml` | Render Blueprint (service + env var declarations; secrets are `sync: false`). |
 | `.github/workflows/deploy.yml` | Runs the test suite, then triggers a Render deploy **only if tests pass**. |
 | `deploy/pbisim-repo-notify.yml` | **Template** to copy into the private `pbisim` repo so engine pushes redeploy the app. |
+| `DEPLOY_TROUBLESHOOTING.md` | **When a working deploy breaks:** build-error decision table, why a valid PAT can go missing, token rotation checklist, post-deploy verification. |
 
 ---
 
