@@ -553,15 +553,18 @@ result = solve_ode(
     dt=0.5,
     method="BDF",              # "BDF" (default, stiff) | "Radau" | "RK45"
     extinction_threshold=1.0,  # populations below this are zeroed (CFU/mL)
-    phage_noise_floor=None,    # suppresses numerical ghost phage; auto from atol when None
+    phage_noise_floor=None,    # suppresses numerical ghost phage; None = auto
 )
 ```
 
-- `extinction_threshold` — absorbing barrier: any strain whose total drops below this
-  value is zeroed and stays zero.  Use `1.0` (1 CFU/mL) to avoid sub-CFU rebounds.
+- `extinction_threshold` — absorbing barrier: a bacterial strain whose total falls
+  through this value is zeroed at that exact moment (solver event) and stays zero;
+  strains rising from zero (mutation-seeded) are untouched until they first reach it.
+  Use `1.0` (1 CFU/mL) to avoid sub-CFU rebounds.  `extinction_check_interval` is not
+  needed for bacteria.
 - `phage_noise_floor` — suppresses numerical ghost phage seeded by implicit solvers
   (Radau/BDF/LSODA) when dormancy is active but phage are not dosed.  Leave as `None`
-  (auto from `atol`) for most simulations.
+  (auto: equals `extinction_threshold` when set, otherwise `atol`) for most simulations.
 
 ---
 

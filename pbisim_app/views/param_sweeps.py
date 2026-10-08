@@ -407,7 +407,7 @@ def _render_body(theme_mode):
                         _carry_prerun_debris(ic, mk_k)
 
                     model = PBIModel(c_k, initial_B=ib_k, initial_P=ip_k, initial_S=is_k, **mk_k)
-                    result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), extinction_threshold=st.session_state.get("int_extinction_threshold", 1.0) or None, extinction_check_interval=st.session_state.get("int_extinction_check_interval", 0.0) or None)
+                    result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), **solver_extinction_kwargs())
 
                     # Compute metrics. Summary metrics use culturable CFU (B+D).
                     _cfu = result.sum_prefixes("B", "D")
@@ -536,7 +536,7 @@ def _render_body(theme_mode):
                                 mk_k["initial_Imm"] = ic.Imm
                             _carry_prerun_debris(ic, mk_k)
                         model = PBIModel(c_k, initial_B=ib_k, initial_P=ip_k, initial_S=is_k, **mk_k)
-                        result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), extinction_threshold=st.session_state.get("int_extinction_threshold", 1.0) or None, extinction_check_interval=st.session_state.get("int_extinction_check_interval", 0.0) or None)
+                        result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), **solver_extinction_kwargs())
                         _cfu = result.sum_prefixes("B", "D")
                         _total_incl = result.sum_prefixes("B", "D", "I", "H")
                         _active = result.sum_prefixes("B")
@@ -636,7 +636,7 @@ def _render_body(theme_mode):
                             _carry_prerun_debris(ic, mk_k)
 
                         model = PBIModel(c_k, initial_B=ib_k, initial_P=ip_k, initial_S=is_k, **mk_k)
-                        result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), extinction_threshold=st.session_state.get("int_extinction_threshold", 1.0) or None, extinction_check_interval=st.session_state.get("int_extinction_check_interval", 0.0) or None)
+                        result = solve_ode(model, t_end=st.session_state.get("int_t_end", 48.0), dt=st.session_state.get("int_dt", 0.25), method=st.session_state.get("int_solver_method", "BDF"), **solver_extinction_kwargs())
 
                         # 2D heatmap metrics use culturable CFU (B+D).
                         total_bacteria = result.sum_prefixes("B", "D")

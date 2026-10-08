@@ -1634,7 +1634,15 @@ def render():
                 "Absorbing Extinction threshold",
                 value=float(st.session_state.get("int_extinction_threshold", 1.0)),
                 step=1.0,
-                help="If density falls below this threshold, it is locked to 0 to prevent numerical recovery.",
+                help=(
+                    "A bacterial strain whose total (B+D+I+H, per mL) falls through this value "
+                    "is set to 0 at that exact moment and cannot regrow from a sub-threshold "
+                    "remnant. Strains rising from zero (mutation-seeded) are left alone until "
+                    "they first reach it. A phage lineage below it stops replicating and is "
+                    "shown as 0. Set to 0 to disable — populations can then rebound from "
+                    "unphysical fractions of a cell (or get stuck near zero through solver "
+                    "round-off)."
+                ),
             )
             st.session_state["int_extinction_check_interval"] = st.number_input(
                 "Extinction check interval (hours)",
@@ -1642,10 +1650,10 @@ def render():
                 min_value=0.0,
                 step=1.0,
                 help=(
-                    "Apply the extinction threshold every this many hours (not just at "
-                    "dose events). Zeroes any sub-threshold strain before it can regrow "
-                    "from a below-threshold pool. Set to 0 to check only at dose boundaries. "
-                    "Ignored when the extinction threshold is 0."
+                    "Extra checkpoints (every this many hours) at which the phage extinction "
+                    "rule is re-applied. Not needed for bacteria — their threshold is enforced "
+                    "continuously. 0 = check at dose times only. Ignored when the extinction "
+                    "threshold is 0."
                 ),
             )
             st.session_state["int_solver_method"] = st.selectbox(
@@ -1657,8 +1665,14 @@ def render():
             )
             st.session_state["int_phage_noise_floor"] = st.number_input(
                 "Phage noise floor suppression",
-                value=float(st.session_state.get("int_phage_noise_floor", 1e-9)),
-                help="Suppress floating-point round-off of non-dosed phages. Set <= 0 to disable.",
+                value=float(st.session_state.get("int_phage_noise_floor", 0.0)),
+                min_value=0.0,
+                format="%g",
+                help=(
+                    "Phage lineages below this level (per mL) are frozen, which suppresses "
+                    "solver round-off 'ghost' phage. 0 = automatic: equal to the extinction "
+                    "threshold when one is set, otherwise the solver tolerance (1e-9)."
+                ),
             )
 
     # ──── Run Button ──────────────────────────────────────────────────────────

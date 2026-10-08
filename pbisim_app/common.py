@@ -2886,11 +2886,8 @@ def run_sim_from_gui_params():
     t_end = st.session_state.get("int_t_end", 48.0)
     dt = st.session_state.get("int_dt", 0.25)
     method = st.session_state.get("int_solver_method", "BDF")
-    extinction_threshold = st.session_state.get("int_extinction_threshold", 1.0) or None
-    extinction_check_interval = st.session_state.get("int_extinction_check_interval", 0.0) or None
     result = solve_ode(model, t_end=t_end, dt=dt, method=method,
-                       extinction_threshold=extinction_threshold,
-                       extinction_check_interval=extinction_check_interval)
+                       **solver_extinction_kwargs())
     return result, config
 
 
@@ -3012,14 +3009,10 @@ def generate_reproduction_code() -> str:
         )
 
     _method = st.session_state.get("int_solver_method", "BDF")
-    _thresh = st.session_state.get("int_extinction_threshold", 1.0) or None
-    _check_int = st.session_state.get("int_extinction_check_interval", 0.0) or None
     code += [
         "",
         "# 3. Solve",
-        f"result = solve_ode(model, t_end={st.session_state.get('int_t_end', 48.0)}, "
-        f"dt={st.session_state.get('int_dt', 0.25)}, method='{_method}', "
-        f"extinction_threshold={_thresh}, extinction_check_interval={_check_int})",
+        f"result = solve_ode(model, {_repro_solve_kwargs()})",
         "",
         "# 4. Plot trajectories",
         "fig, ax = plt.subplots(figsize=(8, 4))",
@@ -3056,12 +3049,26 @@ def _repro_base_config_block(rec, iB, iP, iS, mk, extra_imports=(), initial_P_ov
     return imports, lines
 
 
+def solver_extinction_kwargs():
+    """``solve_ode`` extinction / noise-floor kwargs from the Simulator's solver
+    settings.  A value of 0 means "engine default" (``None``): no threshold, no
+    extra checks, and an automatic phage noise floor (= the extinction threshold
+    when one is set, otherwise the solver ``atol``)."""
+    return dict(
+        extinction_threshold=st.session_state.get("int_extinction_threshold", 1.0) or None,
+        extinction_check_interval=st.session_state.get("int_extinction_check_interval", 0.0) or None,
+        phage_noise_floor=st.session_state.get("int_phage_noise_floor", 0.0) or None,
+    )
+
+
 def _repro_solve_kwargs():
-    _thresh = st.session_state.get("int_extinction_threshold", 1.0) or None
-    _check = st.session_state.get("int_extinction_check_interval", 0.0) or None
+    _kw = solver_extinction_kwargs()
+    _floor = (f", phage_noise_floor={_kw['phage_noise_floor']}"
+              if _kw["phage_noise_floor"] is not None else "")
     return (f"t_end={st.session_state.get('int_t_end', 48.0)}, dt={st.session_state.get('int_dt', 0.25)}, "
             f"method='{st.session_state.get('int_solver_method', 'BDF')}', "
-            f"extinction_threshold={_thresh}, extinction_check_interval={_check}")
+            f"extinction_threshold={_kw['extinction_threshold']}, "
+            f"extinction_check_interval={_kw['extinction_check_interval']}{_floor}")
 
 
 def _repro_prerun_lines(indent, t_prerun):
@@ -3453,6 +3460,7 @@ __all__ = [
     'generate_reproduction_code',
     '_repro_base_config_block',
     '_repro_solve_kwargs',
+    'solver_extinction_kwargs',
     '_repro_prerun_lines',
     'generate_param_sweep_reproduction_code',
     'generate_dose_sweep_reproduction_code',

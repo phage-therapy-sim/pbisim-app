@@ -359,7 +359,7 @@ def _compute_overlay(config, iB, iP, iS, mk, ctx):
             _carry_prerun_debris(_ic, _mk_arm)
         _m = PBIModel(_cfg_arm, initial_B=_armB, initial_P=_armP, initial_S=_iS_arm, **_mk_arm)
         _r = solve_ode(_m, t_end=ctx["t_end"], dt=0.25, method=ctx["method"],
-                       extinction_threshold=ctx["thr"])
+                       **ctx["ext_kw"])
         for _ok in ctx["sel_obs"]:
             _sp = OBSERVABLES.get(_ok, {"log": True, "link": None, "label": _ok})
             _umo = (_ok == "od" and ctx["debris_on"])
@@ -1090,6 +1090,7 @@ def render():
                 "dose_unit": _dose_unit, "dose_label": _dose_lbl,
                 "method": st.session_state.get("int_solver_method", "BDF"),
                 "thr": st.session_state.get("int_extinction_threshold", 1.0) or None,
+                "ext_kw": solver_extinction_kwargs(),
             }
             if st.button("Overlay model on data", key="fit_overlay", width="stretch", type="primary"):
                 try:
