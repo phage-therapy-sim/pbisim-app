@@ -281,7 +281,8 @@ from pbisim import monod_growth, logistic_growth, constant_growth, monod_logisti
     density_throttled_growth, gompertz_growth, sequential_monod, smooth_efficiency_monod
 builder.with_logistic_growth(carrying_capacity=1e9)    # density (logistic): sets the growth fn, K and
                                                        # track_nutrients=False in one call — no dormancy
-                                                       # or with_nutrient setup needed
+                                                       # or with_nutrient setup needed;
+                                                       # crowding_counts_all_cells=True → N=Σ(B+I+D+H)
 builder.with_sequential_growth(rate_factors=[1.0, 0.5],  # diauxic: X phases, one nutrient pool
                                monod_constants=[0.1, 0.5], thresholds=[0.3])  # thresholds len X-1, ↓ in (0,1)
 builder.with_smooth_efficiency_growth(monod_K_low=3.0, theta=0.5, hill=4.0)  # smooth diauxie — better-

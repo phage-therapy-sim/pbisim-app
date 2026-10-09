@@ -261,7 +261,8 @@ def render_model_builder(inoculum_mode="magnitude"):
                          "entry overtakes growth once ΣB/K_dorm > growth_rate/dormancy_rate). "
                          "0 = inherit the growth carrying capacity.")
 
-    # What "density" counts for ALL density signals (dormancy / resuscitation / death).
+    # What "density" counts for ALL density signals (logistic growth, dormancy,
+    # resuscitation, death).
     st.session_state["int_density_total_cells"] = st.checkbox(
         "Density signals count all cell states (B + I + D + H)",
         value=bool(st.session_state.get("int_density_total_cells", False)),
@@ -269,8 +270,8 @@ def render_model_builder(inoculum_mode="magnitude"):
         help="Off (default): density-dependent signals use ACTIVE bacteria only, "
              "ΣB/K. On: they use TOTAL cell density including infected (I), "
              "dormant (D) and hibernating (H) cells — so all compartments count toward "
-             "crowding. Applies to every density / nutrient+density dormancy, "
-             "resuscitation and death signal.")
+             "crowding. Applies to logistic (and Monod×logistic) growth and to every "
+             "density / nutrient+density dormancy, resuscitation and death signal.")
 
     st.markdown("---")
     col1, col2 = st.columns(2)
