@@ -116,6 +116,14 @@ Streamlit UI (app.py)
 
 ## Package-specific conventions
 
+0. **The deployed engine is pinned — bump it with every engine push.** The Docker image
+   installs `pbisim` / `pbisim-fit` at the SHAs in `deploy/pbisim.ref` /
+   `deploy/pbisim-fit.ref` (CI tests the same refs). After pushing an engine change the app
+   depends on: `git -C ../pbisim rev-parse HEAD > deploy/pbisim.ref`, run the app suite,
+   commit, push the app. **Order: engine pushed first** (the SHA must exist on GitHub when
+   Render builds). Help page footer shows what is actually deployed. Why: until 2026-10 the
+   build used `@main` + a constant build arg, so Docker reused a stale cached engine layer
+   and the 0-phage fix shipped without its engine half (see DEPLOY_TROUBLESHOOTING.md §8).
 1. **The system prompt is the contract with the engine.** `prompts/system_prompt.md`
    hard-codes `pbisim` signatures — it is NOT generated. If the `pbisim` public
    API changes, update this prompt in lockstep (coordinate via the integration

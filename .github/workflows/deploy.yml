@@ -49,10 +49,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Resolve pbisim ref
+      # Test against EXACTLY the engine the Docker image will contain: the commits
+      # pinned in deploy/pbisim.ref / deploy/pbisim-fit.ref. A repository_dispatch
+      # from the engine repo may supply client_payload.ref to test a newer engine
+      # commit ahead of bumping the pin (the deploy still uses the pinned file).
+      - name: Resolve pinned refs
         if: steps.cfg.outputs.configured == 'true'
         id: ref
-        run: echo "ref=${{ github.event.client_payload.ref || 'main' }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "ref=${{ github.event.client_payload.ref }}" >> "$GITHUB_OUTPUT"
+          [ -n "${{ github.event.client_payload.ref }}" ] || echo "ref=$(tr -d '[:space:]' < deploy/pbisim.ref)" >> "$GITHUB_OUTPUT"
+          echo "fit_ref=$(tr -d '[:space:]' < deploy/pbisim-fit.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Install pbisim + pbisim-fit (private) + app + pytest
         if: steps.cfg.outputs.configured == 'true'
@@ -64,7 +71,7 @@ jobs:
           # fine-grained PAT must be able to read BOTH private repos. torch is NOT
           # installed: `import pbisim_fit` is lazy (torch loads only for NPE, unused here).
           PBISIM_FIT_TOKEN: ${{ secrets.PBISIM_FIT_TOKEN }}
-          PBISIM_FIT_REF: ${{ github.event.client_payload.ref || 'main' }}
+          PBISIM_FIT_REF: ${{ steps.ref.outputs.fit_ref }}
         run: |
           pip install "git+https://${PBISIM_TOKEN}@github.com/phage-therapy-sim/pbisim.git@${PBISIM_REF}"
           FIT_TOKEN="${PBISIM_FIT_TOKEN:-$PBISIM_TOKEN}"

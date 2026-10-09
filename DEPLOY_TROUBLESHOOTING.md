@@ -242,9 +242,10 @@ Never paste a token into a tracked file, a log, a commit message, or a Dockerfil
    python -c "import pbisim_fit; print('pbisim-fit', pbisim_fit.__version__)"
    ```
 
-4. Confirm the image has the engine commit you expect, not a cached older one. Check for a
-   known-recent change rather than the version string (the version does not move on every
-   fix). For example, the 2026-09 removal of the `min(1, ·)` cap on rising density signals:
+4. Confirm the image has the engine commit you expect: the **Help page footer** shows the
+   installed short hashes (from `deploy/*.ref`, recorded at build time). Before 2026-10 the
+   engine was not pinned, and you had to check for a known-recent change instead of the
+   version string (the version does not move on every fix). For example, the 2026-09 removal of the `min(1, ·)` cap on rising density signals:
 
    ```bash
    python -c "
@@ -261,12 +262,11 @@ Never paste a token into a tracked file, a log, a commit message, or a Dockerfil
 
 Not yet applied — each is a small change to this repo:
 
-- **Pin `PBISIM_REF` to a commit SHA** in `render.yaml` instead of `main`. It busts the
-  pip layer cache by construction, so every deploy provably contains a known engine
-  instead of depending on whether the cache happened to be cleared. Cost: you bump the SHA
-  when you want a new engine — which is the point.
-- **Make the guard message name its source**, e.g. "set PBISIM_TOKEN in the Render
-  dashboard (Environment tab) — see DEPLOY_TROUBLESHOOTING.md §1". Saves a debugging cycle
-  next time.
+- ~~Pin the engine to a commit SHA~~ — **done 2026-10-09**: `deploy/pbisim.ref` /
+  `deploy/pbisim-fit.ref` (see DEPLOY.md §4). Prompted by exactly the failure §1 predicted:
+  the 0-phage fix deployed green but production still raised
+  `No state variables matching prefixes ('P',)` because the cached engine layer predated
+  the engine half of the fix. The Help page footer now shows the installed commits.
+- ~~Make the guard message name its source~~ — **done 2026-10-09**.
 - **Calendar the token expiry** at mint time (§5), so rotation is planned rather than
   discovered from a failed deploy.

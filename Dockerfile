@@ -10,8 +10,16 @@
 #
 # Build args:
 #   PBISIM_TOKEN  fine-grained GitHub PAT with read-only access to the pbisim repo
-#   PBISIM_REF    git ref/tag/SHA of pbisim to install (default: main).
-#                 Change it to force a fresh engine pull (busts the pip layer cache).
+#
+# Engine versions are PINNED to exact commits in deploy/pbisim.ref and
+# deploy/pbisim-fit.ref (one 40-char SHA each). Those files are COPYed in right
+# before the install steps, so bumping a SHA invalidates exactly those layers and
+# the image provably contains the named commits. (Previously the install used
+# `@main` with a constant PBISIM_REF build arg, so Docker reused a cached layer
+# and deploys silently kept a stale engine while the app code updated.)
+# To deploy a new engine: push it, then put its SHA in deploy/pbisim.ref and push
+# the app. PBISIM_REF_OVERRIDE / PBISIM_FIT_REF_OVERRIDE (unset by default) force a
+# different ref for a one-off local build.
 
 ########################  builder  ########################
 FROM python:3.11-slim AS builder
@@ -26,11 +34,15 @@ RUN apt-get update \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# --- 1. Private engine (cached until PBISIM_REF changes) ---
+# --- 1. Private engine, pinned (layer rebuilds whenever deploy/pbisim.ref changes) ---
+COPY deploy/pbisim.ref deploy/pbisim-fit.ref /tmp/refs/
 ARG PBISIM_TOKEN
-ARG PBISIM_REF=main
-RUN test -n "$PBISIM_TOKEN" || (echo "ERROR: PBISIM_TOKEN build arg is required" >&2; exit 1) \
-    && pip install "git+https://${PBISIM_TOKEN}@github.com/phage-therapy-sim/pbisim.git@${PBISIM_REF}"
+ARG PBISIM_REF_OVERRIDE=
+RUN test -n "$PBISIM_TOKEN" || (echo "ERROR: PBISIM_TOKEN build arg is required — set it in the Render dashboard (Environment tab); see DEPLOY_TROUBLESHOOTING.md §1" >&2; exit 1) \
+    && REF="${PBISIM_REF_OVERRIDE:-$(tr -d '[:space:]' < /tmp/refs/pbisim.ref)}" \
+    && echo "Installing pbisim @ ${REF}" \
+    && pip install "git+https://${PBISIM_TOKEN}@github.com/phage-therapy-sim/pbisim.git@${REF}" \
+    && echo "${REF}" > /opt/venv/pbisim.installed-ref
 
 # --- 1b. Private estimation package `pbisim-fit` (powers the Calibration NLS fit).
 #         Its CORE is torch-free (torch lives only in the [sbi]/[neural_ode] extras,
@@ -38,10 +50,13 @@ RUN test -n "$PBISIM_TOKEN" || (echo "ERROR: PBISIM_TOKEN build arg is required"
 #         Reuses PBISIM_TOKEN when PBISIM_FIT_TOKEN is unset — set a separate token
 #         only if your fine-grained PAT is scoped to a single repo. ---
 ARG PBISIM_FIT_TOKEN=
-ARG PBISIM_FIT_REF=main
+ARG PBISIM_FIT_REF_OVERRIDE=
 RUN FIT_TOKEN="${PBISIM_FIT_TOKEN:-$PBISIM_TOKEN}" \
     && test -n "$FIT_TOKEN" || (echo "ERROR: PBISIM_FIT_TOKEN or PBISIM_TOKEN is required" >&2; exit 1) \
-    && pip install "git+https://${FIT_TOKEN}@github.com/phage-therapy-sim/pbisim-fit.git@${PBISIM_FIT_REF}"
+    && FIT_REF="${PBISIM_FIT_REF_OVERRIDE:-$(tr -d '[:space:]' < /tmp/refs/pbisim-fit.ref)}" \
+    && echo "Installing pbisim-fit @ ${FIT_REF}" \
+    && pip install "git+https://${FIT_TOKEN}@github.com/phage-therapy-sim/pbisim-fit.git@${FIT_REF}" \
+    && echo "${FIT_REF}" > /opt/venv/pbisim-fit.installed-ref
 
 # --- 2. App source + remaining deps (editable so prompts/ resolves at runtime) ---
 # [scripting] adds the code-editor component for the opt-in Scripting page; [onnx] adds

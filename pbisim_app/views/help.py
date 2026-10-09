@@ -24,6 +24,27 @@ def _read_doc(name):
         return None
 
 
+def engine_build_info():
+    """``{package: (version, commit)}`` for the installed engine packages.  The commit
+    is what the Docker build actually installed (``<venv>/<pkg>.installed-ref``), or
+    ``None`` outside the deployed image (e.g. a local editable install)."""
+    import sys
+    from importlib.metadata import PackageNotFoundError, version
+    out = {}
+    for pkg in ("pbisim", "pbisim-fit"):
+        try:
+            ver = version(pkg)
+        except PackageNotFoundError:
+            ver = None
+        ref = None
+        try:
+            ref = (Path(sys.prefix) / f"{pkg}.installed-ref").read_text().strip() or None
+        except OSError:
+            pass
+        out[pkg] = (ver, ref)
+    return out
+
+
 def render():
     st.title("Help & User Guide")
     st.markdown(
@@ -194,4 +215,9 @@ def render():
         "- **Calibration / fitting** — the Calibration page ingests NONMEM/Monolix-style long "
         "data; see the in-page help for column mapping.\n"
     )
-    st.caption("pbisim-app 0.1.0 · engine pbisim 1.0 · estimation pbisim-fit 0.1")
+    _parts = []
+    for _pkg, (_ver, _ref) in engine_build_info().items():
+        _parts.append(f"{_pkg} {_ver or 'not installed'}"
+                      + (f" @ {_ref[:7]}" if _ref else ""))
+    st.caption("Running build: " + " · ".join(_parts)
+               + ".  The short hash is the exact commit installed in this deployment.")

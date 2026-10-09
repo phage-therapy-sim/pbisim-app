@@ -44,10 +44,12 @@ GitHub → **Settings → Developer settings → Fine-grained tokens → Generat
      pbisim-fit — the build falls back to it. Set it only for a separate per-repo token.
    - `ANTHROPIC_API_KEY` = leave **empty** for public use (users enter their own key);
      set it only for a private/gated deployment (see §5).
-   - `PBISIM_REF` / `PBISIM_FIT_REF` default to `main` — pin to tags for stability.
+   - Engine versions are **not** env vars: they are pinned to commit SHAs in
+     `deploy/pbisim.ref` / `deploy/pbisim-fit.ref` (see §4). A leftover `PBISIM_REF` /
+     `PBISIM_FIT_REF` in the dashboard is ignored — delete it.
      (pbisim-fit installs its torch-free core only — the fitting import is lazy.)
 3. Deploy. Render exposes these env vars to the Docker build as build ARGs, so the
-   Dockerfile's `ARG PBISIM_TOKEN` / `ARG PBISIM_REF` are populated automatically.
+   Dockerfile's `ARG PBISIM_TOKEN` is populated automatically.
    Confirm in the build logs that the `pip install git+https://***@github.com/...`
    step succeeds (the token is masked).
 
@@ -87,14 +89,21 @@ workflow — every push deploys immediately (no test gate).
   3. Now a push to `pbisim` fires a `repository_dispatch` here → the same test-gated
      deploy runs against the new engine commit (passed through as `client_payload.ref`).
 
-The Dockerfile always installs `pbisim@${PBISIM_REF}`; a rebuild re-pulls that ref. To
-deploy a *specific* engine commit rather than `main`, set `PBISIM_REF` in Render to the
-tag/SHA (and bump it when you want to move) — that also busts the pip layer cache.
+**The deployed engine is pinned.** The Dockerfile installs `pbisim` and `pbisim-fit` at the
+40-character commit SHAs in `deploy/pbisim.ref` and `deploy/pbisim-fit.ref`. The ref files
+are `COPY`ed in right before the install steps, so changing a SHA rebuilds exactly those
+layers, and an unchanged SHA reuses them. The image therefore provably contains the named
+commits; the Help page footer shows the installed short hashes.
 
-> **Trade-off:** "always deploy latest engine" can break the live app if a `pbisim` API
-> changes (the system prompt is a hand-maintained contract — see `test_system_prompt_sync`).
-> The test gate in §3 is what prevents a broken engine from reaching production. For
-> maximum stability, pin `PBISIM_REF` to a released tag and bump deliberately.
+**To ship an engine change:** push the engine, write its SHA into `deploy/pbisim.ref`
+(`git -C ../pbisim rev-parse HEAD > deploy/pbisim.ref`), and push the app. CI tests against
+the same pinned refs.
+
+> **Why not `main`?** Until 2026-10 the build installed `@main` with a constant build arg.
+> Docker's cache key for that step never changed, so Render reused a cached engine layer
+> indefinitely: the app code updated on every deploy while the engine stayed at whatever
+> commit was current when the layer was first built. A fix that spanned both repos (the
+> 0-phage crash) deployed "successfully" and still failed in production.
 
 ---
 
@@ -128,7 +137,7 @@ both at once:
 export PBISIM_TOKEN=github_pat_xxx
 docker build \
   --build-arg PBISIM_TOKEN="$PBISIM_TOKEN" \
-  --build-arg PBISIM_REF=main \
+  # engine refs come from deploy/*.ref; for a one-off: --build-arg PBISIM_REF_OVERRIDE=<ref>
   -t pbisim-app .
 
 docker run --rm -p 8501:8501 \

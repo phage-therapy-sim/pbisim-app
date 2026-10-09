@@ -22,15 +22,12 @@ services:
     autoDeploy: true         # redeploy on every push to main (no CI/deploy-hook needed)
     healthCheckPath: /_stcore/health
     envVars:
-      # git ref of the private engine to build against (non-secret)
-      - key: PBISIM_REF
-        value: main
+      # Engine / pbisim-fit versions are NOT set here: they are pinned to commit SHAs
+      # in deploy/pbisim.ref and deploy/pbisim-fit.ref (see the Dockerfile). A leftover
+      # PBISIM_REF / PBISIM_FIT_REF env var in the dashboard is ignored — delete it.
       # fine-grained READ-ONLY GitHub PAT scoped to the pbisim repo — set in dashboard
       - key: PBISIM_TOKEN
         sync: false
-      # git ref of the private estimation package (powers the Calibration fit)
-      - key: PBISIM_FIT_REF
-        value: main
       # READ-ONLY PAT for the pbisim-fit repo. OMIT if PBISIM_TOKEN already has read
       # access to pbisim-fit (the build falls back to it); set only if you use a
       # separate per-repo token.
