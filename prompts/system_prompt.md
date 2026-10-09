@@ -279,12 +279,17 @@ Default growth is Monod (`monod_growth`) via `with_nutrient`. To use another for
 ```python
 from pbisim import monod_growth, logistic_growth, constant_growth, monod_logistic_growth, \
     density_throttled_growth, gompertz_growth, sequential_monod, smooth_efficiency_monod
-builder.with_growth_function(logistic_growth)          # density (logistic), needs carrying_capacity
+builder.with_logistic_growth(carrying_capacity=1e9)    # density (logistic): sets the growth fn, K and
+                                                       # track_nutrients=False in one call — no dormancy
+                                                       # or with_nutrient setup needed
 builder.with_sequential_growth(rate_factors=[1.0, 0.5],  # diauxic: X phases, one nutrient pool
                                monod_constants=[0.1, 0.5], thresholds=[0.3])  # thresholds len X-1, ↓ in (0,1)
 builder.with_smooth_efficiency_growth(monod_K_low=3.0, theta=0.5, hill=4.0)  # smooth diauxie — better-
     # conditioned FIT. Monod K blends from efficient monod_constant (high S) to monod_K_low (low S).
 ```
+An **antibiotic-only** (phage-free) model is valid: `ModelBuilder(n_bacteria=1, n_phages=0)`,
+`initial_P=np.zeros(0)`; `result.sum_prefixes("P")` then returns zeros (no `KeyError`).
+
 `gompertz_growth` is a **nutrient**-response sigmoid `exp(-exp(-k(S-S∞)))` reading `monod_constant`
 as `k` and `carrying_capacity` as `S∞` — both on the nutrient scale (S~0–1), NOT the density scale.
 

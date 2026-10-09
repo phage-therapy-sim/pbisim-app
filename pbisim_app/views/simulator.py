@@ -1468,6 +1468,11 @@ def render():
                             min_value=0.0, value=float(dose.get("amount", 0.0)), format="%.2e",
                             key=f"dose_amt_{_did}", label_visibility="collapsed")
                         st.caption(f"→ {dose['target_type']} #{dose['target_idx']}")
+                        _n_avail = {"phage": len(phages), "antibiotic": len(antibiotics)}.get(
+                            dose["target_type"])
+                        if _n_avail is not None and int(dose["target_idx"]) >= _n_avail:
+                            st.caption(f":orange[⚠ no {dose['target_type']} #{dose['target_idx']} "
+                                       f"in this model — this dose is ignored]")
                     with c_t3:
                         dose["route"] = st.selectbox(
                             "Route", _routes, index=_routes.index(dose.get("route", "bolus")),
@@ -1487,7 +1492,9 @@ def render():
                 st.markdown("#### Add Single Dose Event")
                 with st.expander("+ Define Single Dosing Event"):
                     # Build target options
-                    target_ops = ["phage"]
+                    # Only offer compartments the model has (a phage-free model is a
+                    # valid antibiotic-only PK/PD setup).
+                    target_ops = ["phage"] if len(phages) > 0 else []
                     if len(antibiotics) > 0:
                         target_ops.append("antibiotic")
                     target_ops.append("nutrient")
@@ -1536,7 +1543,7 @@ def render():
                 st.markdown("#### Add Repeat Dosing Regimen")
                 with st.expander("+ Define Repeat Dosing Regimen"):
                     # Target options
-                    target_ops_rep = ["phage"]
+                    target_ops_rep = ["phage"] if len(phages) > 0 else []
                     if len(antibiotics) > 0:
                         target_ops_rep.append("antibiotic")
                     target_ops_rep.append("nutrient")
@@ -1814,8 +1821,8 @@ def render():
                 f"""
                 <div class="metric-container">
                     <div class="metric-label">Peak Phage Titre</div>
-                    <div class="metric-value">{peak_phage:.2e}</div>
-                    <div class="metric-sub">PFU/mL at t={peak_phage_t:.1f}h</div>
+                    <div class="metric-value">{f"{peak_phage:.2e}" if phages else "—"}</div>
+                    <div class="metric-sub">{f"PFU/mL at t={peak_phage_t:.1f}h" if phages else "no phage in model"}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,

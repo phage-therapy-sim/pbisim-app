@@ -320,7 +320,7 @@ def _render_body(theme_mode):
                 _traces["Total incl. infected (B+D+I+H)"] = ("log", _dr["total_incl_trajectories"])
             if _dr.get("active_trajectories"):
                 _traces["Active only (B)"] = ("log", _dr["active_trajectories"])
-            if _dr.get("phage_trajectories"):
+            if _dr.get("phage_trajectories") and st.session_state.get("int_phages"):
                 _traces["Free phage — infection site (PFU/mL)"] = ("log", _dr["phage_trajectories"])
             if _dr.get("central_phage_trajectories"):
                 _traces["Central phage — blood (PFU/mL)"] = ("log", _dr["central_phage_trajectories"])

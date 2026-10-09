@@ -273,9 +273,12 @@ def _render_body(theme_mode):
             _central_name = "Central phage — blood (PFU/mL)"
             if _pk_on:
                 _TRIAL_OUTPUTS[_central_name] = (("Pc",), "log₁₀ PFU/mL")
+            if not _tphages:   # antibiotic-only model: no phage panel to offer
+                _TRIAL_OUTPUTS.pop("Free phage — infection site (PFU/mL)")
             _outputs = st.multiselect(
                 "Outputs", list(_TRIAL_OUTPUTS),
-                default=["CFU — culturable (B+D)", "Free phage — infection site (PFU/mL)"],
+                default=["CFU — culturable (B+D)"]
+                        + (["Free phage — infection site (PFU/mL)"] if _tphages else []),
                 key="trial_pkpd_outputs",
             )
             if _pk_on and _central_name in _outputs and len(set(_pk_vcs)) > 1:

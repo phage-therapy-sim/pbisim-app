@@ -686,7 +686,7 @@ def _render_body(theme_mode):
                     _traces["Total incl. infected (B+D+I+H)"] = ("log", _ps["total_incl_trajectories"])
                 if _ps.get("active_trajectories"):
                     _traces["Active only (B)"] = ("log", _ps["active_trajectories"])
-                if _ps.get("phage_trajectories"):
+                if _ps.get("phage_trajectories") and st.session_state.get("int_phages"):
                     _traces["Free phage — infection site (PFU/mL)"] = ("log", _ps["phage_trajectories"])
                 if _ps.get("central_phage_trajectories"):
                     _traces["Central phage — blood (PFU/mL)"] = ("log", _ps["central_phage_trajectories"])
@@ -719,7 +719,7 @@ def _render_body(theme_mode):
                     _traces["Total incl. infected (B+D+I+H)"] = ("log", _ps["total_incl_trajectories"])
                 if _ps.get("active_trajectories"):
                     _traces["Active only (B)"] = ("log", _ps["active_trajectories"])
-                if _ps.get("phage_trajectories"):
+                if _ps.get("phage_trajectories") and st.session_state.get("int_phages"):
                     _traces["Free phage — infection site (PFU/mL)"] = ("log", _ps["phage_trajectories"])
                 if _ps.get("central_phage_trajectories"):
                     _traces["Central phage — blood (PFU/mL)"] = ("log", _ps["central_phage_trajectories"])
@@ -752,7 +752,7 @@ def _render_body(theme_mode):
                     _traces["Total incl. infected (B+D+I+H)"] = ("log", _ps["total_incl_trajectories"])
                 if _ps.get("active_trajectories"):
                     _traces["Active only (B)"] = ("log", _ps["active_trajectories"])
-                if _ps.get("phage_trajectories"):
+                if _ps.get("phage_trajectories") and st.session_state.get("int_phages"):
                     _traces["Free phage — infection site (PFU/mL)"] = ("log", _ps["phage_trajectories"])
                 if _ps.get("central_phage_trajectories"):
                     _traces["Central phage — blood (PFU/mL)"] = ("log", _ps["central_phage_trajectories"])

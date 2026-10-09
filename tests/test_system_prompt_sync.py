@@ -58,6 +58,7 @@ def test_modelbuilder_constructor_signature():
         "with_growth_function",
         "with_sequential_growth",
         "with_smooth_efficiency_growth",
+        "with_logistic_growth",
         "with_transition_function",
         "build",
     ],
